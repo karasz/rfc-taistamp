@@ -1,0 +1,433 @@
+%%%
+title = "Taiclock: Signed TAI64N Timestamps over HTTP"
+abbrev = "Taiclock"
+ipr = "trust200902"
+area = "Applications"
+workgroup = "Independent Submission"
+submissiontype = "independent"
+keyword = ["TAI64N", "TAI", "time", "Ed25519", "well-known", "DKIM"]
+date = 2026-04-30T00:00:00Z
+
+[seriesInfo]
+name = "Internet-Draft"
+value = "draft-nagy-taiclock-00"
+stream = "independent"
+status = "informational"
+
+[[author]]
+initials = "K. G."
+surname = "Nagy"
+fullname = "Károly Gábriel Nagy"
+  [author.address]
+  email = "nagy.karoly@apptly.co"
+
+[[author]]
+initials = "A."
+surname = "Mery"
+fullname = "Alejandro Mery"
+organization = "Apptly Software Ltd"
+  [author.address]
+  email = "amery@apptly.co"
+  uri = "https://apptly.co/"
+  [author.address.postal]
+  street = "28 Melrose Avenue"
+  city = "Brighton"
+  code = "BN41 2LS"
+  country = "United Kingdom"
+%%%
+
+<!-- cspell:words Károly Gábriel misissued DMARC mainmatter backmatter -->
+
+
+.# Abstract
+
+This memo defines Taiclock, an HTTP-accessible service
+that returns the current time as a TAI64N label,
+optionally signed with Ed25519. The service is reached
+at the well-known URI `/.well-known/taiclock` and is
+intended for clients that need an authenticated
+wall-clock reading without running an NTP stack or
+trusting an unauthenticated TLS handshake clock. The
+signing scheme uses a length-prefixed, domain-separated
+framing and publishes verification keys as DNS TXT
+records in a DKIM-inspired selector layout.
+
+{mainmatter}
+
+# Introduction
+
+Many small clients need an accurate wall-clock reading
+to validate certificates, evaluate signature freshness,
+or stamp local events. Two common sources fall short:
+
+- An NTP client is intrusive on constrained or sandboxed
+  runtimes and exposes the device to a separate trust
+  domain.
+- The TLS handshake clock is not authenticated by any
+  party the client can name; an attacker who can serve
+  a valid certificate (for instance via a misissued
+  intermediate or via a cooperating CA) can also adjust
+  the apparent time.
+
+Taiclock addresses these by serving the current time as
+a 25-byte TAI64N [@TAI64] label over HTTP, with an
+optional Ed25519 [@!RFC8032] signature bound to a
+client-supplied nonce. Verification keys are published
+in DNS as TXT records under a DKIM-style [@?RFC6376]
+selector, so a verifier can rotate keys without
+coordinating with clients.
+
+The protocol is deliberately small. A compliant
+implementation fits in a single fetch handler, has no
+state beyond its signing key, and is independent of any
+specific HTTP framework or runtime.
+
+# Conventions and Definitions
+
+The key words "MUST", "MUST NOT", "REQUIRED", "SHALL",
+"SHALL NOT", "SHOULD", "SHOULD NOT", "RECOMMENDED",
+"NOT RECOMMENDED", "MAY", and "OPTIONAL" in this
+document are to be interpreted as described in BCP 14
+[@!RFC2119] [@!RFC8174] when, and only when, they
+appear in all capitals, as shown here.
+
+The terms "TAI" and "TAI64N" are used as defined in
+[@TAI64].
+
+The term "selector" is used in the DKIM
+sense [@?RFC6376]: an opaque, host-scoped label that
+selects one verification key from possibly many
+published under the same host.
+
+# Resource
+
+A Taiclock service is reached at the well-known
+URI [@?RFC8615]:
+
+~~~
+/.well-known/taiclock
+~~~
+
+A request URI MUST be the exact path above. Query
+strings, if any, are ignored by this version of the
+protocol and MUST NOT change the response.
+
+## Methods
+
+A server MUST accept `GET` and `HEAD`. A server MUST
+respond `405 Method Not Allowed` to any other method,
+and MUST include `Allow: GET, HEAD` on the 405
+response.
+
+A `HEAD` response MUST carry the same headers as the
+corresponding `GET` response and MUST NOT include a
+body.
+
+## Successful Response
+
+A successful `GET` response has status `200 OK` and a
+body consisting of exactly 25 ASCII bytes: the TAI64N
+external representation of the server's current time,
+formatted per [@TAI64]:
+
+~~~
+'@' hex16(seconds-since-TAI-epoch) hex8(nanoseconds)
+~~~
+
+where `hex16` and `hex8` denote 16 and 8 lowercase
+hexadecimal digits respectively. The leading `@` is
+literal.
+
+The following headers MUST be present:
+
+| Header           | Value                                |
+|------------------|--------------------------------------|
+| `Content-Type`   | `application/tai64n`                 |
+| `Content-Length` | `25`                                 |
+| `Cache-Control`  | `no-store`                           |
+| `TAI-Leap-Seconds` | decimal count, e.g. `37`           |
+
+`TAI-Leap-Seconds` carries the offset, in seconds,
+between TAI and UTC at the moment of the response. It
+is informational; the TAI64N label is the canonical
+time. A server MUST emit it on every successful
+response.
+
+A server MAY also offer the vendor type
+`application/vnd.djb.tai64n` for clients that prefer
+to negotiate it explicitly. A server SHOULD default
+to `application/tai64n` when no preference is
+expressed.
+
+## Nonce Echo
+
+A client MAY send a request header `TAI-Nonce` carrying
+an opaque, application-defined byte string in the
+header value. If present, the server MUST echo the
+header verbatim on the response.
+
+A server MUST NOT interpret the nonce. Clients SHOULD
+choose nonces that are unpredictable to a network
+observer when freshness matters; 16 random bytes
+encoded as base64url are sufficient for typical use.
+
+# Signing
+
+A Taiclock service MAY be configured with an Ed25519
+[@!RFC8032] signing key and a selector. When both are
+configured, the server signs every response that
+carries a `TAI-Nonce`.
+
+A signed successful response carries two additional
+headers:
+
+| Header              | Value                                  |
+|---------------------|----------------------------------------|
+| `TAI-Key-Selector`  | the selector configured on the server  |
+| `TAI-Signature`     | base64url, no padding, of the signature|
+
+The selector MUST match the production
+`[A-Za-z0-9_-]{1,63}` so that it forms a single,
+DNS-safe label.
+
+## Framed Payload
+
+The signed payload is the concatenation, in order, of
+the following fields:
+
+~~~
+domain-tag    = "taiclock-v1" 0x00
+label-bytes   = 25 octets ; the response body
+leap-u32be    = 4 octets  ; TAI-Leap-Seconds, big-endian unsigned
+selector-len  = 1 octet   ; length of selector-bytes, 1..63
+selector-bytes = 1..63 octets ; the selector, US-ASCII
+nonce-bytes   = octets    ; the request TAI-Nonce, verbatim
+
+payload = domain-tag label-bytes leap-u32be
+          selector-len selector-bytes nonce-bytes
+~~~
+
+The trailing NUL on `domain-tag` is significant: it
+prevents extension of the tag into adjacent bytes by
+an attacker who controls the protocol version string.
+
+The selector is length-prefixed by a single byte. A
+downgrade attacker who rewrites `TAI-Key-Selector` on
+the wire cannot match an existing signature without
+also matching its length, which forces a hash
+collision under Ed25519.
+
+The nonce occupies the tail of the payload. Its length
+is therefore self-delimiting: a verifier that has
+recovered `domain-tag`, `label-bytes`, `leap-u32be`,
+`selector-len`, and `selector-bytes` reconstructs the
+nonce as the remaining input.
+
+## When to Sign
+
+A server SHOULD sign a response if and only if all of
+the following hold:
+
+- The server is configured with a key and selector.
+- The request carried a `TAI-Nonce` header.
+- The response is a 200 to `GET` or `HEAD`.
+
+Servers MUST NOT sign 405 responses.
+
+A request without a nonce MAY receive an unsigned
+response even when the server is configured to sign.
+This allows trivially cacheable probes to coexist with
+authenticated reads, though the response itself MUST
+remain `Cache-Control: no-store` because the label is
+time-sensitive.
+
+# Key Publication
+
+Verification keys are published as DNS TXT records.
+The owner name is
+
+~~~
+<selector> "._taiclock." <host>
+~~~
+
+where `<host>` is the authority component of the URL at
+which `/.well-known/taiclock` is served, and
+`<selector>` is the value the server emits in
+`TAI-Key-Selector`.
+
+The TXT record value is a single string, of length at
+most 255 octets, formatted as a tag-value list in the
+DKIM/DMARC style:
+
+~~~
+v=tai1; k=ed25519; p=<base64-of-32-raw-pubkey-bytes>
+~~~
+
+| Tag | Value |
+|-----|-------|
+| `v` | Protocol version. `tai1` for the framing in this document. |
+| `k` | Key algorithm. `ed25519` is the only algorithm currently defined. |
+| `p` | Public key, standard base64 of the 32 raw Ed25519 public-key bytes. |
+
+A verifier MUST treat unknown tags as informational.
+A verifier MUST treat an unknown `v` or `k` as an
+unrecoverable failure for that selector and MUST NOT
+fall back silently.
+
+## Key Rotation
+
+To rotate a key, an operator publishes a new TXT record
+under a new selector, then reconfigures the server to
+sign with the new selector. The old TXT record SHOULD
+remain in DNS until any cached responses signed under
+the old selector have aged out of verifier caches; at
+that point the old TXT record MAY be removed.
+
+Verifiers cache by selector, not by host. A response
+signed under selector `S` remains verifiable while the
+TXT record at `S._taiclock.<host>` is reachable and
+its parsed value is unchanged.
+
+# Verification
+
+A verifier reads the response and reconstructs the
+framed payload as defined in (#signing). The verifier
+MUST:
+
+1. Confirm that the request `TAI-Nonce` matches the
+   response `TAI-Nonce` byte-for-byte.
+2. Confirm that the response carries
+   `TAI-Key-Selector` and `TAI-Signature`.
+3. Resolve the TXT record at
+   `<selector>._taiclock.<host>` and parse the
+   `v`, `k`, and `p` tags.
+4. Verify the Ed25519 signature using the public key
+   from `p` over the framed payload.
+
+Steps 1, 2, and 4 MUST all succeed. A verifier MUST
+NOT accept a label whose signature is absent or whose
+signature does not verify.
+
+A verifier that does not implement the optional
+signature path MAY still consume the unsigned label,
+provided it understands that it is trusting the
+underlying transport with no protocol-level
+authentication of the time value.
+
+# Security Considerations
+
+## Threat Model
+
+Taiclock authenticates a single time reading at the
+moment a verifier asks. It does not establish a long-
+running synchronised clock and does not bound network
+delay; a verifier is responsible for treating the
+returned label as a measurement subject to the
+round-trip time of its request.
+
+## Replay
+
+A response is bound to its request only via the
+`TAI-Nonce` echo and its inclusion in the signed
+payload. A verifier that reuses a nonce, or that omits
+the nonce, gains no replay protection. Verifiers
+SHOULD generate a fresh, unpredictable nonce for each
+request.
+
+## Domain Separation
+
+The `taiclock-v1\0` prefix prevents an Ed25519 key
+configured for Taiclock from being induced to sign a
+message valid under another protocol that happens to
+embed the same suffix. Operators SHOULD NOT reuse a
+Taiclock signing key for any other purpose.
+
+## DNS Trust
+
+Verification reduces to trusting the DNS lookup of the
+TXT record at `<selector>._taiclock.<host>`. A
+verifier that does not validate DNS responses (for
+instance via DNSSEC or a trusted resolver path) is
+vulnerable to a DNS attacker who can substitute a
+public key. Operators SHOULD publish under a DNSSEC-
+signed zone where feasible.
+
+## Clock Manipulation
+
+A signature attests that the server emitted a given
+label; it does not attest that the server's clock is
+correct. An operator whose clock is drifting or
+deliberately set wrong will sign whatever label its
+clock produces. Verifiers that depend on Taiclock for
+high-stakes decisions SHOULD compare readings from
+multiple independently operated services.
+
+## Leap-Second Reporting
+
+The `TAI-Leap-Seconds` header is informational and is
+not covered by the signature in any way that prevents
+an operator from emitting a wrong value. The label
+itself is the authenticated artefact; verifiers that
+care about UTC equivalence MUST source the
+TAI-to-UTC offset from a trusted table rather than
+from the server.
+
+# IANA Considerations
+
+## Well-Known URI
+
+IANA is requested to register the following entry in
+the "Well-Known URIs" registry [@?RFC8615]:
+
+| Field | Value |
+|-------|-------|
+| URI Suffix | `taiclock` |
+| Change Controller | IETF |
+| Reference | This document |
+| Status | permanent |
+| Related Information | none |
+
+## Media Type
+
+IANA is requested to register the media type
+`application/tai64n` in the "Media Types" registry
+per [@?RFC6838]:
+
+- Type name: `application`
+- Subtype name: `tai64n`
+- Required parameters: none
+- Optional parameters: none
+- Encoding considerations: 7-bit (US-ASCII)
+- Security considerations: see (#security-considerations)
+- Interoperability considerations: none
+- Published specification: this document
+- Applications that use this media type: time-
+  authentication clients
+- Fragment identifier considerations: none
+- Restrictions on usage: none
+- Provisional registration: no
+- Author/Change controller: IETF
+
+## Header Fields
+
+IANA is requested to register the following entries in
+the "Hypertext Transfer Protocol (HTTP) Field Name
+Registry" [@?RFC9110]:
+
+| Field Name        | Status     | Reference        |
+|-------------------|------------|------------------|
+| `TAI-Leap-Seconds`| permanent  | this document    |
+| `TAI-Nonce`       | permanent  | this document    |
+| `TAI-Key-Selector`| permanent  | this document    |
+| `TAI-Signature`   | permanent  | this document    |
+
+{backmatter}
+
+<reference anchor="TAI64" target="https://cr.yp.to/libtai/tai64.html">
+  <front>
+    <title>TAI64, TAI64N, and TAI64NA</title>
+    <author initials="D. J." surname="Bernstein" fullname="Daniel J. Bernstein"/>
+    <date year="1997"/>
+  </front>
+</reference>
+
