@@ -1,6 +1,6 @@
 %%%
-title = "Taiclock: Signed TAI64N Timestamps over HTTP"
-abbrev = "Taiclock"
+title = "Taistamp: Signed TAI64N Timestamps over HTTP"
+abbrev = "Taistamp"
 ipr = "trust200902"
 area = "Applications"
 workgroup = "Independent Submission"
@@ -10,7 +10,7 @@ date = 2026-04-30T00:00:00Z
 
 [seriesInfo]
 name = "Internet-Draft"
-value = "draft-nagy-taiclock-00"
+value = "draft-nagy-taistamp-00"
 stream = "independent"
 status = "informational"
 
@@ -41,10 +41,10 @@ organization = "Apptly Software Ltd"
 
 .# Abstract
 
-This memo defines Taiclock, an HTTP-accessible service
+This memo defines Taistamp, an HTTP-accessible service
 that returns the current time as a TAI64N label,
 optionally signed with Ed25519. The service is reached
-at the well-known URI `/.well-known/taiclock` and is
+at the well-known URI `/.well-known/taistamp` and is
 intended for clients that need an authenticated
 wall-clock reading without running an NTP stack or
 trusting an unauthenticated TLS handshake clock. The
@@ -69,7 +69,7 @@ or stamp local events. Two common sources fall short:
   intermediate or via a cooperating CA) can also adjust
   the apparent time.
 
-Taiclock addresses these by serving the current time as
+Taistamp addresses these by serving the current time as
 a 25-byte TAI64N [@TAI64] label over HTTP, with an
 optional Ed25519 [@!RFC8032] signature bound to a
 client-supplied nonce. Verification keys are published
@@ -99,13 +99,18 @@ sense [@?RFC6376]: an opaque, host-scoped label that
 selects one verification key from possibly many
 published under the same host.
 
+HTTP field values defined in this document use
+Structured Field Values [@!RFC8941]. Type annotations
+(Integer, Binary, Token) refer to the item types
+defined in that specification.
+
 # Resource
 
-A Taiclock service is reached at the well-known
+A Taistamp service is reached at the well-known
 URI [@?RFC8615]:
 
 ~~~
-/.well-known/taiclock
+/.well-known/taistamp
 ~~~
 
 A request URI MUST be the exact path above. Query
@@ -119,9 +124,13 @@ respond `405 Method Not Allowed` to any other method,
 and MUST include `Allow: GET, HEAD` on the 405
 response.
 
-A `HEAD` response MUST carry the same headers as the
-corresponding `GET` response and MUST NOT include a
-body.
+A `HEAD` response MUST NOT include a body and MUST
+carry the same headers as the corresponding `GET`
+response, with the exception that `TAI-Key-Selector`
+and `TAI-Signature` MUST NOT be present. Because the
+signed payload covers the response body, a signature
+cannot be verified without it; `HEAD` is therefore
+useful only as a liveness or configuration probe.
 
 ## Successful Response
 
@@ -145,13 +154,19 @@ The following headers MUST be present:
 | `Content-Type`   | `application/tai64n`                 |
 | `Content-Length` | `25`                                 |
 | `Cache-Control`  | `no-store`                           |
-| `TAI-Leap-Seconds` | decimal count, e.g. `37`           |
+| `TAI-Leap-Seconds` | sf-integer, e.g. `37`              |
 
 `TAI-Leap-Seconds` carries the offset, in seconds,
-between TAI and UTC at the moment of the response. It
-is informational; the TAI64N label is the canonical
-time. A server MUST emit it on every successful
-response.
+between TAI and UTC at the moment of the response,
+as a Structured Field Integer [@!RFC8941]. Its value
+is included in the signed payload as `leap-u32be`
+(see (#framed-payload)). A server MUST emit it on
+every successful response. It is a singleton field (Section 5.5 of
+[@?RFC9110]) and MUST NOT appear more than once in
+a response. A recipient that encounters more than one
+instance MUST treat the field as absent per Section
+4.2 of [@!RFC8941]; the recipient then has no
+server-supplied TAI-to-UTC offset for this response.
 
 A server MAY also offer the vendor type
 `application/vnd.djb.tai64n` for clients that prefer
@@ -162,18 +177,31 @@ expressed.
 ## Nonce Echo
 
 A client MAY send a request header `TAI-Nonce` carrying
-an opaque, application-defined byte string in the
-header value. If present, the server MUST echo the
-header verbatim on the response.
+an opaque byte string encoded as a Structured Field
+Binary [@!RFC8941]. If present, the server MUST echo
+the header verbatim on the response. `TAI-Nonce` is a
+singleton field (Section 5.5 of [@?RFC9110]) and MUST
+NOT appear more than once in a request or response. A
+recipient that encounters more than one instance MUST
+treat the field as absent per Section 4.2 of
+[@!RFC8941]. A server that treats a request `TAI-Nonce`
+as absent for this reason MUST NOT sign the response.
+A client that treats a response `TAI-Nonce` as absent
+MUST treat the response as unsigned regardless of
+whether `TAI-Signature` is present.
 
-A server MUST NOT interpret the nonce. Clients SHOULD
-choose nonces that are unpredictable to a network
-observer when freshness matters; 16 random bytes
-encoded as base64url are sufficient for typical use.
+A server MUST NOT interpret the nonce. The `TAI-Nonce`
+field value MUST be at least 14 octets and MUST NOT
+exceed 174 octets; a server that receives a `TAI-Nonce`
+outside this range MUST NOT sign the response. Clients
+SHOULD choose nonces that are unpredictable to a
+network observer when freshness matters; 16 random
+bytes encoded as an sf-binary value are sufficient for
+typical use.
 
 # Signing
 
-A Taiclock service MAY be configured with an Ed25519
+A Taistamp service MAY be configured with an Ed25519
 [@!RFC8032] signing key and a selector. When both are
 configured, the server signs every response that
 carries a `TAI-Nonce`.
@@ -183,12 +211,25 @@ headers:
 
 | Header              | Value                                  |
 |---------------------|----------------------------------------|
-| `TAI-Key-Selector`  | the selector configured on the server  |
-| `TAI-Signature`     | base64url, no padding, of the signature|
+| `TAI-Key-Selector`  | the selector, as an sf-token           |
+| `TAI-Signature`     | the Ed25519 signature, as an sf-binary |
 
 The selector MUST match the production
-`[A-Za-z0-9_-]{1,63}` so that it forms a single,
-DNS-safe label.
+`[A-Za-z][A-Za-z0-9_-]{0,62}` so that it forms a
+single, DNS-safe label and is a valid sf-token
+[@!RFC8941]. `TAI-Key-Selector` is a singleton field
+(Section 5.5 of [@?RFC9110]) and MUST NOT appear more
+than once in a response. A recipient that encounters
+more than one instance MUST treat the field as absent
+per Section 4.2 of [@!RFC8941]; the response MUST
+then be treated as unsigned.
+
+`TAI-Signature` is a singleton field (Section 5.5 of
+[@?RFC9110]) and MUST NOT appear more than once in a
+response. A recipient that encounters more than one
+instance MUST treat the field as absent per Section
+4.2 of [@!RFC8941]; the response MUST then be treated
+as unsigned.
 
 ## Framed Payload
 
@@ -196,12 +237,12 @@ The signed payload is the concatenation, in order, of
 the following fields:
 
 ~~~
-domain-tag    = "taiclock-v1" 0x00
+domain-tag    = "taistamp-v1" 0x00
 label-bytes   = 25 octets ; the response body
 leap-u32be    = 4 octets  ; TAI-Leap-Seconds, big-endian unsigned
 selector-len  = 1 octet   ; length of selector-bytes, 1..63
 selector-bytes = 1..63 octets ; the selector, US-ASCII
-nonce-bytes   = octets    ; the request TAI-Nonce, verbatim
+nonce-bytes   = octets    ; the TAI-Nonce header value, verbatim
 
 payload = domain-tag label-bytes leap-u32be
           selector-len selector-bytes nonce-bytes
@@ -230,9 +271,9 @@ the following hold:
 
 - The server is configured with a key and selector.
 - The request carried a `TAI-Nonce` header.
-- The response is a 200 to `GET` or `HEAD`.
+- The response is a 200 to `GET`.
 
-Servers MUST NOT sign 405 responses.
+Servers MUST NOT sign HEAD or 405 responses.
 
 A request without a nonce MAY receive an unsigned
 response even when the server is configured to sign.
@@ -241,17 +282,29 @@ authenticated reads, though the response itself MUST
 remain `Cache-Control: no-store` because the label is
 time-sensitive.
 
+## Intermediary Handling
+
+An intermediary (proxy or gateway) that forwards a
+Taistamp request or response MUST forward the
+`TAI-Nonce`, `TAI-Leap-Seconds`, `TAI-Key-Selector`,
+and `TAI-Signature` fields intact and MUST NOT modify
+or remove them. Stripping or rewriting `TAI-Nonce` on
+a request prevents the server from signing the
+response. Stripping or rewriting any of the response
+fields prevents the client from verifying the
+signature.
+
 # Key Publication
 
 Verification keys are published as DNS TXT records.
 The owner name is
 
 ~~~
-<selector> "._taiclock." <host>
+<selector> "._taistamp." <host>
 ~~~
 
 where `<host>` is the authority component of the URL at
-which `/.well-known/taiclock` is served, and
+which `/.well-known/taistamp` is served, and
 `<selector>` is the value the server emits in
 `TAI-Key-Selector`.
 
@@ -285,7 +338,7 @@ that point the old TXT record MAY be removed.
 
 Verifiers cache by selector, not by host. A response
 signed under selector `S` remains verifiable while the
-TXT record at `S._taiclock.<host>` is reachable and
+TXT record at `S._taistamp.<host>` is reachable and
 its parsed value is unchanged.
 
 # Verification
@@ -299,7 +352,7 @@ MUST:
 2. Confirm that the response carries
    `TAI-Key-Selector` and `TAI-Signature`.
 3. Resolve the TXT record at
-   `<selector>._taiclock.<host>` and parse the
+   `<selector>._taistamp.<host>` and parse the
    `v`, `k`, and `p` tags.
 4. Verify the Ed25519 signature using the public key
    from `p` over the framed payload.
@@ -318,7 +371,7 @@ authentication of the time value.
 
 ## Threat Model
 
-Taiclock authenticates a single time reading at the
+Taistamp authenticates a single time reading at the
 moment a verifier asks. It does not establish a long-
 running synchronised clock and does not bound network
 delay; a verifier is responsible for treating the
@@ -336,16 +389,16 @@ request.
 
 ## Domain Separation
 
-The `taiclock-v1\0` prefix prevents an Ed25519 key
-configured for Taiclock from being induced to sign a
+The `taistamp-v1\0` prefix prevents an Ed25519 key
+configured for Taistamp from being induced to sign a
 message valid under another protocol that happens to
 embed the same suffix. Operators SHOULD NOT reuse a
-Taiclock signing key for any other purpose.
+Taistamp signing key for any other purpose.
 
 ## DNS Trust
 
 Verification reduces to trusting the DNS lookup of the
-TXT record at `<selector>._taiclock.<host>`. A
+TXT record at `<selector>._taistamp.<host>`. A
 verifier that does not validate DNS responses (for
 instance via DNSSEC or a trusted resolver path) is
 vulnerable to a DNS attacker who can substitute a
@@ -358,19 +411,21 @@ A signature attests that the server emitted a given
 label; it does not attest that the server's clock is
 correct. An operator whose clock is drifting or
 deliberately set wrong will sign whatever label its
-clock produces. Verifiers that depend on Taiclock for
+clock produces. Verifiers that depend on Taistamp for
 high-stakes decisions SHOULD compare readings from
 multiple independently operated services.
 
 ## Leap-Second Reporting
 
-The `TAI-Leap-Seconds` header is informational and is
-not covered by the signature in any way that prevents
-an operator from emitting a wrong value. The label
-itself is the authenticated artefact; verifiers that
-care about UTC equivalence MUST source the
-TAI-to-UTC offset from a trusted table rather than
-from the server.
+The `TAI-Leap-Seconds` header is included in the
+signed payload as `leap-u32be`; the signature attests
+that the server emitted this specific value, but not
+that it is correct. An operator whose leap-second
+table is wrong, or who deliberately sets it wrong,
+will sign whatever count they emit. Verifiers that
+care about UTC equivalence MUST source the TAI-to-UTC
+offset from a trusted table rather than from the
+server.
 
 # IANA Considerations
 
@@ -381,7 +436,7 @@ the "Well-Known URIs" registry [@?RFC8615]:
 
 | Field | Value |
 |-------|-------|
-| URI Suffix | `taiclock` |
+| URI Suffix | `taistamp` |
 | Change Controller | IETF |
 | Reference | This document |
 | Status | permanent |
@@ -414,12 +469,12 @@ IANA is requested to register the following entries in
 the "Hypertext Transfer Protocol (HTTP) Field Name
 Registry" [@?RFC9110]:
 
-| Field Name        | Status     | Reference        |
-|-------------------|------------|------------------|
-| `TAI-Leap-Seconds`| permanent  | this document    |
-| `TAI-Nonce`       | permanent  | this document    |
-| `TAI-Key-Selector`| permanent  | this document    |
-| `TAI-Signature`   | permanent  | this document    |
+| Field Name        | Status    | Structured Type | Reference     |
+|-------------------|-----------|-----------------|---------------|
+| `TAI-Leap-Seconds`| permanent | Integer         | this document |
+| `TAI-Nonce`       | permanent | Binary          | this document |
+| `TAI-Key-Selector`| permanent | Token           | this document |
+| `TAI-Signature`   | permanent | Binary          | this document |
 
 {backmatter}
 
