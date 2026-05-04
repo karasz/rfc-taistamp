@@ -3,14 +3,13 @@ title = "Taistamp: Signed TAI64N Timestamps over HTTP"
 abbrev = "Taistamp"
 ipr = "trust200902"
 area = "Applications"
-workgroup = "Independent Submission"
 submissiontype = "independent"
 keyword = ["TAI64N", "TAI", "time", "Ed25519", "well-known", "DKIM"]
-date = 2026-04-30T00:00:00Z
+date = 2026-05-03T18:55:16Z
 
 [seriesInfo]
 name = "Internet-Draft"
-value = "draft-nagy-taistamp-00"
+value = "draft-mery-nagy-taistamp-00"
 stream = "independent"
 status = "informational"
 
@@ -42,7 +41,7 @@ organization = "Apptly Software Ltd"
 <!-- cspell:words Cloudflare Deno Spectre Bernstein Treynor Sloss Venanti -->
 <!-- cspell:words DKIM DNSSEC AEAD ECDSA -->
 <!-- cspell:words attosecond attoseconds -->
-<!-- cspell:words hardcoded timestamping tai64n djb vnd -->
+<!-- cspell:words hardcoded timestamping tai64n -->
 <!-- cspell:words misissued DMARC mainmatter backmatter -->
 
 
@@ -109,10 +108,12 @@ Taistamp works over plain HTTP. The Ed25519 signature
 provides authentication and integrity at the
 application layer, independent of the transport: any
 in-transit modification breaks the signature, and a
-client-supplied nonce prevents replay. A network
-attacker who cannot forge the signature can at most
-drop or delay responses, which is a denial of service
-rather than a security breach.
+client-supplied nonce prevents replay. These guarantees
+apply only to responses bearing a valid `TAI-Signature`
+matching a request `TAI-Nonce`. A network attacker who
+cannot forge the signature can at most drop or delay
+responses, which is a denial of service rather than
+a security breach.
 
 TLS [@?RFC8446] is RECOMMENDED. It adds transport
 confidentiality (hiding that a client is querying for
@@ -129,7 +130,9 @@ worker, or behind a load balancer with no session
 affinity or shared state.
 
 Because Taistamp is transported over TCP-based HTTP
-and the response body is a fixed 25 bytes, it is not
+and the response body is a fixed 25 bytes, and even 
+including HTTP headers request and response are both
+bounded under 1 KB regardless of input, it is not
 an amplification vector: an attacker cannot induce a
 server to produce a response meaningfully larger than
 the request.
@@ -172,10 +175,12 @@ a correctness hazard.
 
 TAI [@TAI64] is strictly monotonic. TAI64N encodes TAI
 seconds and nanoseconds in a fixed 25-byte ASCII label
-with no ambiguity at any leap-second boundary. Clients
-that need a UTC equivalent can apply the TAI-to-UTC
-offset supplied in `TAI-Leap-Seconds`, sourced from a
-trusted table of their choice.
+with no ambiguity at any leap-second boundary. The
+`TAI-Leap-Seconds` header carries the offset as informational
+guidance; clients requiring UTC equivalence for high-stakes
+decisions SHOULD source the offset from a trusted table rather
+than relying solely on the server-supplied value
+(see (#leap-second-reporting)).
 
 ## Why the External Representation
 
@@ -323,7 +328,7 @@ selects one verification key from possibly many
 published under the same host.
 
 HTTP field values defined in this document use
-Structured Field Values [@!RFC8941]. Type annotations
+Structured Field Values [@!RFC9651]. Type annotations
 (Integer, Binary, Token) refer to the item types
 defined in that specification.
 
@@ -342,10 +347,13 @@ protocol and MUST NOT change the response.
 
 ## Methods
 
-A server MUST accept `GET` and `HEAD`. A server MUST
-respond `405 Method Not Allowed` to any other method,
-and MUST include `Allow: GET, HEAD` on the 405
-response.
+A server MUST accept `GET` and `HEAD`. A server that
+supports CORS (see (#cross-origin-resource-sharing)) MUST
+also accept `OPTIONS`. A server MUST respond
+`405 Method Not Allowed` to any other method and MUST
+include `Allow: GET, HEAD` on the 405 response; a server
+that supports CORS MUST instead include
+`Allow: GET, HEAD, OPTIONS`.
 
 A `HEAD` response MUST NOT include a body and MUST
 carry the same headers as the corresponding `GET`
@@ -354,6 +362,28 @@ and `TAI-Signature` MUST NOT be present. Because the
 signed payload covers the response body, a signature
 cannot be verified without it; `HEAD` is therefore
 useful only as a liveness or configuration probe.
+
+## Cross-Origin Resource Sharing
+
+A Taistamp server intended for access from browser pages
+SHOULD respond to `OPTIONS` requests with status `200`
+and the following headers:
+
+- `Access-Control-Allow-Origin: *` (or a site-specific
+  origin policy)
+- `Access-Control-Allow-Methods: GET, HEAD`
+- `Access-Control-Allow-Headers: TAI-Nonce`
+- `Access-Control-Expose-Headers: TAI-Leap-Seconds,
+  TAI-Nonce, TAI-Key-Selector, TAI-Signature`
+
+A browser making a cross-origin request that includes the
+`TAI-Nonce` header will send an `OPTIONS` preflight before
+the actual `GET`; without the appropriate
+`Access-Control-*` response headers the browser will block
+the request. Non-browser clients are unaffected.
+
+`OPTIONS` responses MUST NOT carry `TAI-Key-Selector` or
+`TAI-Signature` and MUST NOT be signed.
 
 ## Successful Response
 
@@ -381,44 +411,53 @@ The following headers MUST be present:
 
 `TAI-Leap-Seconds` carries the offset, in seconds,
 between TAI and UTC at the moment of the response,
-as a Structured Field Integer [@!RFC8941]. Its value
-is included in the signed payload as `leap-u32be`
+as a Structured Field Integer [@!RFC9651]. leap-seconds
+emitted MUST be a non-negative integer in [0, 2^32−1];
+sf-integer supports values up to ±10^15 but values outside
+[0, 2^32−1] cannot be encoded in `leap-u32be`. A verifier
+that receives a `TAI-Leap-Seconds` value outside this range
+MUST treat the response as unsigned.
+Its value is included in the signed payload as `leap-u32be`
 (see (#framed-payload)). A server MUST emit it on
 every successful response. It is a singleton field
 (Section 5.5 of [@?RFC9110]) and MUST NOT appear
 more than once in a response. A recipient that
 encounters more than one instance MUST treat the field
-as absent per Section 4.2 of [@!RFC8941];
+as absent per Section 4.2 of [@!RFC9651];
 the recipient then has no server-supplied TAI-to-UTC
-offset for this response.
-
-A server MAY also offer the vendor type
-`application/vnd.djb.tai64n` for clients that prefer
-to negotiate it explicitly. A server SHOULD default
-to `application/tai64n` when no preference is
-expressed.
+offset for this response and MUST treat the response
+as unsigned regardless of whether `TAI-Signature` is present.
 
 ## Nonce Echo
 
 A client MAY send a request header `TAI-Nonce` carrying
 an opaque byte string encoded as a Structured Field
-Binary [@!RFC8941]. If present, the server MUST echo
+Binary [@!RFC9651]. If present, the server MUST echo
 the header verbatim on the response. `TAI-Nonce` is a
 singleton field (Section 5.5 of [@?RFC9110]) and MUST
 NOT appear more than once in a request or response. A
 recipient that encounters more than one instance MUST
 treat the field as absent per Section 4.2 of
-[@!RFC8941]. A server that treats a request `TAI-Nonce`
+[@!RFC9651]. A server that treats a request `TAI-Nonce`
 as absent for this reason MUST NOT sign the response.
+A server MAY instead respond with `400 Bad Request` when
+a request contains duplicate `TAI-Nonce` fields.
 A client that treats a response `TAI-Nonce` as absent
 MUST treat the response as unsigned regardless of
 whether `TAI-Signature` is present.
 
-A server MUST NOT interpret the nonce. The `TAI-Nonce`
-field value MUST be at least 14 octets and MUST NOT
-exceed 174 octets; a server that receives a `TAI-Nonce`
-outside this range MUST NOT sign the response. Clients
-SHOULD choose nonces that are unpredictable to a
+A server MUST NOT interpret the nonce. If a server
+receives a `TAI-Nonce` that is a malformed sf-binary
+it MUST treat the field as absent and MUST NOT sign
+the response. The `TAI-Nonce` field value MUST be
+at least 14 octets and MUST NOT exceed 174 octets.
+14 octets corresponds to `sf-binary` of ~7 raw bytes
+(: + 12 base64 + =-pad + :); 174 corresponds to ~129
+raw bytes. A server that receives a `TAI-Nonce`
+outside this range MUST NOT sign the response.
+A zero-length or syntactically empty field value is below
+the minimum and MUST be treated as absent.
+Clients SHOULD choose nonces that are unpredictable to a
 network observer when freshness matters; 16 random
 bytes encoded as an sf-binary value are sufficient for
 typical use.
@@ -447,21 +486,26 @@ A signed successful response carries two additional headers:
 | `TAI-Key-Selector`  | the selector, as an sf-token           |
 | `TAI-Signature`     | the Ed25519 signature, as an sf-binary |
 
-The selector MUST match the production
-`[A-Za-z][A-Za-z0-9_-]{0,62}` so that it forms a
-single, DNS-safe label and is a valid sf-token
-[@!RFC8941]. `TAI-Key-Selector` is a singleton field
+The selector MUST match the following ABNF production
+[@!RFC5234] so that it forms a single, DNS-safe label
+and is a valid sf-token [@!RFC9651]:
+
+~~~
+selector = ALPHA *62( ALPHA / DIGIT / "-" / "_" )
+~~~
+
+`TAI-Key-Selector` is a singleton field
 (Section 5.5 of [@?RFC9110]) and MUST NOT appear more
 than once in a response. A recipient that encounters
 more than one instance MUST treat the field as absent
-per Section 4.2 of [@!RFC8941]; the response MUST
+per Section 4.2 of [@!RFC9651]; the response MUST
 then be treated as unsigned.
 
 `TAI-Signature` is a singleton field (Section 5.5 of
 [@?RFC9110]) and MUST NOT appear more than once in a
 response. A recipient that encounters more than one
 instance MUST treat the field as absent per Section
-4.2 of [@!RFC8941]; the response MUST then be treated
+4.2 of [@!RFC9651]; the response MUST then be treated
 as unsigned.
 
 ## Framed Payload
@@ -475,13 +519,18 @@ label-bytes   = 25 octets ; the response body
 leap-u32be    = 4 octets  ; TAI-Leap-Seconds,
               ;   big-endian unsigned
 selector-len  = 1 octet   ; length of selector-bytes, 1..63
-selector-bytes = 1..63 octets ; the selector, US-ASCII
+selector-bytes = 1..63 octets ; the selector, ASCII
 nonce-bytes   = octets    ; the TAI-Nonce header
               ;   value, verbatim
 
 payload = domain-tag label-bytes leap-u32be
           selector-len selector-bytes nonce-bytes
 ~~~
+
+nonce-bytes is the octets of the `TAI-Nonce` HTTP
+field value as transmitted, after standard HTTP
+parser whitespace stripping but before any 
+`sf-binary` base64 decoding.
 
 The trailing NUL on `domain-tag` is significant: it
 prevents extension of the tag into adjacent bytes by
@@ -508,11 +557,11 @@ the following hold:
 - The request carried a `TAI-Nonce` header.
 - The response is a 200 to `GET`.
 
-Servers MUST NOT sign HEAD or 405 responses.
+Servers MUST NOT sign HEAD, OPTIONS, or 405 responses.
 
 A request without a nonce MAY receive an unsigned
 response even when the server is configured to sign.
-This allows trivially cacheable probes to coexist with
+This allows lightweight unsigned probes to coexist with
 authenticated reads, though the response itself MUST
 remain `Cache-Control: no-store` because the label is
 time-sensitive.
@@ -527,6 +576,14 @@ or remove them. Stripping or rewriting `TAI-Nonce` on
 a request prevents the server from signing the response.
 Stripping or rewriting any of the response fields
 prevents the client from verifying the signature.
+
+These requirements apply to Taistamp-aware intermediaries.
+General-purpose proxies that do not recognise `TAI-*` fields
+may strip or modify them without violating their own
+specifications. Operators who require signed responses SHOULD
+avoid placing non-transparent intermediaries between client and
+server, or verify that any intermediaries are configured to
+forward these fields intact.
 
 # Key Publication
 
@@ -557,8 +614,10 @@ v=tai1; k=ed25519; p=<base64-of-32-raw-pubkey-bytes>
 |-----|-------|
 | `v` | Protocol version. `tai1` for the framing in this document. |
 | `k` | Key algorithm. `ed25519` is the only algorithm currently defined. |
-| `p` | Public key, standard base64 of the 32 raw Ed25519 public-key bytes. |
+| `p` | Public key, standard base64 of the 32 raw Ed25519 public key bytes. |
 
+
+Parsing is done as specified in Section 3.2 of [@!RFC6376]
 A verifier MUST treat unknown tags as informational.
 A verifier MUST treat an unknown `v` or `k` as an
 unrecoverable failure for that selector and MUST NOT
@@ -639,9 +698,12 @@ payload as defined in (#signing). The verifier MUST:
 4. Verify the Ed25519 signature using the public key
    from `p` over the framed payload.
 
-Steps 1, 2, and 4 MUST all succeed. A verifier MUST
+Steps 1, 2, 3 and 4 MUST all succeed. A verifier MUST
 NOT accept a label whose signature is absent or whose
 signature does not verify.
+
+Verifiers MUST use the strict verification procedure
+described in Section 5.1.7 of [@RFC8032].
 
 A verifier that does not implement the optional
 signature path MAY still consume the unsigned label,
@@ -674,7 +736,7 @@ request.
 The `taistamp-v1\0` prefix prevents an Ed25519 key
 configured for Taistamp from being induced to sign a
 message valid under another protocol that happens to
-embed the same suffix. Operators SHOULD NOT reuse a
+embed the same suffix. Operators MUST NOT reuse a
 Taistamp signing key for any other purpose.
 
 ## DNS Trust
@@ -729,6 +791,17 @@ limit this window to at most one TTL interval.
 Operators who require a short revocation window
 SHOULD configure a low DNS TTL on key records.
 
+## Verifier Re-fetch Side Channel
+
+A verifier that re-fetches a DNS TXT record when cached-key
+verification fails (see (#verifier-key-caching)) may be induced
+to issue many DNS queries. An attacker who floods a verifier with
+responses signed under unknown or rapidly rotating selectors can
+trigger one DNS lookup per response, amplifying traffic into DNS
+query load on the verifier's resolver. Verifiers SHOULD apply
+rate-limiting or exponential back-off on TXT record re-fetches
+for any given `<selector>._taistamp.<host>` name.
+
 # IANA Considerations
 
 ## Well-Known URI
@@ -754,7 +827,7 @@ per [@?RFC6838]:
 - Subtype name: `tai64n`
 - Required parameters: none
 - Optional parameters: none
-- Encoding considerations: 7-bit (US-ASCII)
+- Encoding considerations: 7-bit (ASCII)
 - Security considerations: see (#security-considerations)
 - Interoperability considerations: none
 - Published specification: this document
@@ -799,8 +872,8 @@ Registry" [@?RFC9110]:
 <reference anchor="Roughtime" target="https://roughtime.googlesource.com/roughtime">
   <front>
     <title>Roughtime</title>
-    <author initials="B." surname="Treynor Sloss" fullname="Ben Treynor Sloss"/>
-    <author initials="M." surname="Venanti" fullname="Marcus Venanti"/>
+    <author initials="A." surname="Langley" fullname="Adam Langley"/>
+    <author initials="R." surname="Obryk" fullname="Robert Obryk"/>
     <date year="2016"/>
   </front>
 </reference>
