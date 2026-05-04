@@ -22,9 +22,10 @@ build: $(TXT) $(HTML)
 update-date:
 	sed -i "s|^date = .*|date = $$(date -u +%Y-%m-%dT%H:%M:%SZ)|" $(SRC)
 
-$(XML): update-date $(SRC)
+$(XML): $(SRC)
+	@$(MAKE) update-date
 	@$(call check_tool,$(MMARK),Install: go install github.com/mmarkdown/mmark/v2@latest)
-	$(MMARK) $< > $@
+	$(MMARK) $< > $@~ && mv $@~ $@
 
 $(TXT): $(XML)
 	@$(call check_tool,$(XML2RFC),Install: pip install xml2rfc)
@@ -53,3 +54,4 @@ idnits: $(TXT)
 
 clean:
 	rm -f $(XML) $(TXT) $(HTML)
+
