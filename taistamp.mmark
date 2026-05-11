@@ -14,13 +14,6 @@ stream = "independent"
 status = "informational"
 
 [[author]]
-initials = "K. G."
-surname = "Nagy"
-fullname = "Károly Gábriel Nagy"
-  [author.address]
-  email = "nagy.karoly@apptly.co"
-
-[[author]]
 initials = "A."
 surname = "Mery"
 fullname = "Alejandro Mery"
@@ -33,6 +26,13 @@ organization = "Apptly Software Ltd"
   city = "Brighton"
   code = "BN41 2LS"
   country = "United Kingdom"
+
+[[author]]
+initials = "K. G."
+surname = "Nagy"
+fullname = "Károly Gábriel Nagy"
+  [author.address]
+  email = "nagy.karoly@apptly.co"
 %%%
 
 .# Abstract
@@ -66,7 +66,7 @@ or stamp local events. Two common sources fall short:
   the apparent time.
 
 Taistamp addresses these by serving the current time as
-a 25-byte TAI64N [@TAI64] label over HTTP, with an
+a 25-byte TAI64N [@!TAI64] label over HTTP, with an
 optional Ed25519 [@!RFC8032] signature bound to a
 client-supplied nonce. Verification keys are published
 in DNS as TXT records under a DKIM-style [@?RFC6376]
@@ -87,7 +87,8 @@ Browsers, serverless runtimes (Cloudflare Workers, AWS
 Lambda, Deno Deploy), edge nodes, and CDN origins can
 all serve and consume HTTP without additional
 infrastructure. Port 443 (or 80) is open where
-UDP 123 (NTP), UDP 2002 (Roughtime), and UDP 4014
+UDP 123 (NTP), UDP 2002 (Roughtime, port
+assignment pending), and UDP 4014
 (TAICLOCK [@TAICLOCK]) are commonly firewalled.
 A compliant Taistamp server requires nothing beyond a
 single request handler; a compliant client requires
@@ -119,19 +120,22 @@ be deployed as a CDN edge function, a serverless
 worker, or behind a load balancer with no session
 affinity or shared state.
 
-Because Taistamp is transported over TCP-based HTTP
-and the response body is a fixed 25 bytes, and even 
-including HTTP headers request and response are both
-bounded under 1 KB regardless of input, it is not
-an amplification vector: an attacker cannot induce a
-server to produce a response meaningfully larger than
-the request.
+Taistamp is transported over TCP-based HTTP, which
+rules out UDP-style spoofed-source amplification.
+Both request and response are bounded under 1 KB
+regardless of input — the response body is a fixed
+25 bytes, and the response headers (`TAI-Nonce`
+echo, `TAI-Signature`, `TAI-Key-Selector`,
+`TAI-Leap-Seconds`) add at most a few hundred
+octets — an attacker cannot induce a response
+meaningfully larger than the request, so Taistamp
+is not usable as an amplification vector.
 
 ## Why DNS-Based Key Discovery
 
-Roughtime [@Roughtime] addresses the same authenticated-
+Roughtime [@Roughtime] addresses the same authenticated
 time problem but distributes trust differently: clients
-ship with a curated list of trusted server public keys.
+ship with a configured list of trusted server public keys.
 Key rotation therefore requires a client update or a
 coordinated key-distribution mechanism outside the
 protocol.
@@ -147,8 +151,9 @@ in DNS. DNSSEC [@?RFC4033] can protect the key material
 end-to-end where the operator controls a signed zone.
 
 This approach deliberately trades the ecosystem-level
-misbehaviour detection that Roughtime's Merkle-tree
-proofs provide for simpler, decentralised deployability:
+misbehaviour detection that Roughtime's multi-server
+cross-checking provides for simpler, decentralised
+deployability:
 any operator with a domain name and an HTTP endpoint can
 run a Taistamp server without registering with a central
 authority.
@@ -163,7 +168,7 @@ For applications that check certificate validity windows
 or evaluate signature freshness, an ambiguous second is
 a correctness hazard.
 
-TAI [@TAI64] is strictly monotonic. TAI64N encodes TAI
+TAI [@!TAI64] is strictly monotonic. TAI64N encodes TAI
 seconds and nanoseconds in a fixed 25-byte ASCII label
 with no ambiguity at any leap-second boundary. The
 `TAI-Leap-Seconds` header carries the offset as informational
@@ -177,7 +182,7 @@ than relying solely on the server-supplied value
 TAICLOCK [@TAICLOCK] encodes timestamps as 16 bytes of
 binary TAI64NA (8 bytes of seconds, 4 of nanoseconds,
 4 of attoseconds). Taistamp instead uses the TAI64N
-external representation [@TAI64]: the ASCII character
+external representation [@!TAI64]: the ASCII character
 `@` followed by 16 lowercase hexadecimal digits for
 the seconds field and 8 for the nanoseconds field,
 totalling 25 bytes.
@@ -293,10 +298,10 @@ protocols are complementary rather than overlapping.
 **Roughtime [@Roughtime]** is an authenticated time
 protocol that also uses Ed25519 signatures and is
 designed for constrained clients. It operates over UDP,
-distributes trust via a baked-in server list and
-Merkle-tree cross-checking, and is optimised for
-detecting misbehaving servers across an ecosystem of
-providers. Taistamp is simpler and more narrowly
+distributes trust via a configured list of server
+public keys, and detects misbehaving servers by
+comparing timestamps and accuracy radii across
+multiple providers. Taistamp is simpler and more narrowly
 scoped: a single HTTP endpoint, DNS-based key
 discovery, and no ecosystem coordination requirement.
 
@@ -310,7 +315,7 @@ document are to be interpreted as described in BCP 14
 appear in all capitals, as shown here.
 
 The terms "TAI" and "TAI64N" are used as defined in
-[@TAI64].
+[@!TAI64].
 
 The term "selector" is used in the DKIM
 sense [@?RFC6376]: an opaque, host-scoped label that
@@ -338,20 +343,25 @@ protocol and MUST NOT change the response.
 ## Methods
 
 A server MUST accept `GET` and `HEAD`. A server that
-supports CORS (see (#cross-origin-resource-sharing)) MUST
-also accept `OPTIONS`. A server MUST respond
-`405 Method Not Allowed` to any other method and MUST
-include `Allow: GET, HEAD` on the 405 response; a server
-that supports CORS MUST instead include
-`Allow: GET, HEAD, OPTIONS`.
+supports CORS (see (#cross-origin-resource-sharing))
+MUST also accept `OPTIONS`; a server without CORS
+support MAY accept `OPTIONS`. A server MUST respond
+`405 Method Not Allowed` to any method it does not
+accept. The `Allow` header on a 405 response, and
+on a successful `OPTIONS` response, MUST enumerate
+the methods the server accepts ([@?RFC9110],
+Section 10.2.1): a server that accepts `OPTIONS`
+emits `Allow: GET, HEAD, OPTIONS`; one that does
+not emits `Allow: GET, HEAD`.
 
 A `HEAD` response MUST NOT include a body and MUST
 carry the same headers as the corresponding `GET`
-response, with the exception that `TAI-Key-Selector`
-and `TAI-Signature` MUST NOT be present. Because the
-signed payload covers the response body, a signature
-cannot be verified without it; `HEAD` is therefore
-useful only as a liveness or configuration probe.
+response, with the exception that `TAI-Nonce`,
+`TAI-Key-Selector`, and `TAI-Signature` MUST NOT
+be present. Because the signed payload covers the
+response body, a signature cannot be verified
+without it; `HEAD` is therefore useful only as a
+liveness or configuration probe.
 
 ## Cross-Origin Resource Sharing
 
@@ -365,12 +375,24 @@ and the following headers:
 - `Access-Control-Allow-Headers: TAI-Nonce`
 - `Access-Control-Expose-Headers: TAI-Leap-Seconds,
   TAI-Nonce, TAI-Key-Selector, TAI-Signature`
+- `Access-Control-Max-Age: 600` (or a higher operator-
+  chosen value)
 
 A browser making a cross-origin request that includes the
 `TAI-Nonce` header will send an `OPTIONS` preflight before
 the actual `GET`; without the appropriate
 `Access-Control-*` response headers the browser will block
 the request. Non-browser clients are unaffected.
+
+Servers SHOULD emit `Access-Control-Max-Age` with a
+value of at least 600 seconds. Pre-flight responses
+carry no per-request data and are safe to cache for
+the lifetime of the deployed CORS configuration.
+In the absence of this header, browser pre-flight
+cache lifetimes diverge significantly across
+implementations, which may cause a pre-flight
+request to precede every cross-origin GET in
+high-traffic deployments.
 
 `OPTIONS` responses MUST NOT carry `TAI-Key-Selector` or
 `TAI-Signature` and MUST NOT be signed.
@@ -380,7 +402,7 @@ the request. Non-browser clients are unaffected.
 A successful `GET` response has status `200 OK` and a
 body consisting of exactly 25 ASCII bytes: the TAI64N
 external representation of the server's current time,
-formatted per [@TAI64]:
+formatted per [@!TAI64]:
 
 ~~~
 '@' hex16(seconds-since-TAI-epoch) hex8(nanoseconds)
@@ -443,7 +465,22 @@ the response. The `TAI-Nonce` field value MUST be
 at least 14 octets and MUST NOT exceed 174 octets.
 14 octets corresponds to `sf-binary` of ~7 raw bytes
 (: + 12 base64 + =-pad + :); 174 corresponds to ~129
-raw bytes. A server that receives a `TAI-Nonce`
+raw bytes.
+
+The lower bound corresponds to ~7 raw bytes of
+client-supplied entropy, which is sufficient
+unpredictability for the replay defence in this
+section. The upper bound corresponds to ~129 raw
+bytes and caps the nonce's contribution to overall
+response size; combined with the 25-byte body and
+the other response headers, the total response
+stays well under 1 KB. Implementations that require
+larger nonces for compatibility with a higher-entropy
+convention may negotiate a future extension; this
+version of the protocol holds the bounds fixed for
+interoperability.
+
+A server that receives a `TAI-Nonce`
 outside this range MUST NOT sign the response.
 A zero-length or syntactically empty field value is below
 the minimum and MUST be treated as absent.
@@ -504,7 +541,7 @@ The signed payload is the concatenation, in order, of
 the following fields:
 
 ~~~
-domain-tag    = "taistamp-v1" 0x00
+domain-tag    = "taistamp-v1" %x00
 label-bytes   = 25 octets ; the response body
 leap-u32be    = 4 octets  ; TAI-Leap-Seconds,
               ;   big-endian unsigned
@@ -519,7 +556,7 @@ payload = domain-tag label-bytes leap-u32be
 
 nonce-bytes is the octets of the `TAI-Nonce` HTTP
 field value as transmitted, after standard HTTP
-parser whitespace stripping but before any 
+parser whitespace stripping but before any
 `sf-binary` base64 decoding.
 
 The trailing NUL on `domain-tag` is significant: it
@@ -529,8 +566,11 @@ an attacker who controls the protocol version string.
 The selector is length-prefixed by a single byte. A
 downgrade attacker who rewrites `TAI-Key-Selector` on
 the wire cannot match an existing signature without
-also matching its length, which forces a hash
-collision under Ed25519.
+also matching its length, as the signature is bound
+to the exact payload including the length byte;
+forging a valid signature for a different selector
+length is computationally infeasible under the
+existential unforgeability of Ed25519.
 
 The nonce occupies the tail of the payload. Its length
 is therefore self-delimiting: a verifier that has
@@ -540,14 +580,12 @@ nonce as the remaining input.
 
 ## When to Sign
 
-A server SHOULD sign a response if and only if all of
+A server MUST sign a response if and only if all of
 the following hold:
 
 - The server is configured with a key and selector.
 - The request carried a `TAI-Nonce` header.
 - The response is a 200 to `GET`.
-
-Servers MUST NOT sign HEAD, OPTIONS, or 405 responses.
 
 A request without a nonce MAY receive an unsigned
 response even when the server is configured to sign.
@@ -607,7 +645,7 @@ v=tai1; k=ed25519; p=<base64-of-32-raw-pubkey-bytes>
 | `p` | Public key, standard base64 of the 32 raw Ed25519 public key bytes. |
 
 
-Parsing is done as specified in Section 3.2 of [@!RFC6376]
+Parsing is done as specified in Section 3.2 of [@!RFC6376].
 A verifier MUST treat unknown tags as informational.
 A verifier MUST treat an unknown `v` or `k` as an
 unrecoverable failure for that selector and MUST NOT
@@ -618,7 +656,7 @@ fall back silently.
 Key rotation follows a publish-then-switch-then-retire
 sequence.
 
-Operators should choose a DNS TTL for the TXT
+Operators SHOULD choose a DNS TTL for the TXT
 record that balances query load against key rotation
 speed. A TTL between 3600 seconds (1 hour) and
 86400 seconds (24 hours) is RECOMMENDED for stable
@@ -680,8 +718,9 @@ payload as defined in (#signing). The verifier MUST:
 
 1. Confirm that the request `TAI-Nonce` matches the
    response `TAI-Nonce` byte-for-byte.
-2. Confirm that the response carries
-   `TAI-Key-Selector` and `TAI-Signature`.
+2. Confirm that the `TAI-Key-Selector` value
+   is a well-formed selector matching the ABNF
+   in (#signing).
 3. Resolve the TXT record at
    `<selector>._taistamp.<host>` and parse the
    `v`, `k`, and `p` tags.
@@ -693,7 +732,7 @@ NOT accept a label whose signature is absent or whose
 signature does not verify.
 
 Verifiers MUST use the strict verification procedure
-described in Section 5.1.7 of [@RFC8032].
+described in Section 5.1.7 of [@!RFC8032].
 
 A verifier that does not implement the optional
 signature path MAY still consume the unsigned label,
@@ -723,7 +762,7 @@ request.
 
 ## Domain Separation
 
-The `taistamp-v1\0` prefix prevents an Ed25519 key
+The `taistamp-v1%x00` prefix prevents an Ed25519 key
 configured for Taistamp from being induced to sign a
 message valid under another protocol that happens to
 embed the same suffix. Operators MUST NOT reuse a
@@ -775,8 +814,8 @@ indication that the key has been revoked.
 
 The exposure window is bounded by the DNS TTL
 remaining on the cached entry at the moment of
-revocation. Verifiers that honour the MUST NOT
-exceed TTL rule in (#key-rotation) will naturally
+revocation. Verifiers that honour the TTL limit
+required by (#verifier-key-caching) will naturally
 limit this window to at most one TTL interval.
 Operators who require a short revocation window
 SHOULD configure a low DNS TTL on key records.
@@ -859,12 +898,13 @@ Registry" [@?RFC9110]:
   </front>
 </reference>
 
-<reference anchor="Roughtime" target="https://roughtime.googlesource.com/roughtime">
+<reference anchor="Roughtime" target="https://datatracker.ietf.org/doc/draft-ietf-ntp-roughtime/">
   <front>
     <title>Roughtime</title>
-    <author initials="A." surname="Langley" fullname="Adam Langley"/>
-    <author initials="R." surname="Obryk" fullname="Robert Obryk"/>
-    <date year="2016"/>
+    <author initials="W." surname="Ladd" fullname="Watson Ladd"/>
+    <author initials="M." surname="Dansarie" fullname="Marcus Dansarie"/>
+    <date year="2026"/>
   </front>
+  <annotation>Aanchal Malhotra and Adam Langley authored early drafts of this document.</annotation>
 </reference>
 
