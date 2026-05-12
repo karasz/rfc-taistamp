@@ -172,9 +172,8 @@ TAI [@!TAI64] is strictly monotonic. TAI64N encodes TAI
 seconds and nanoseconds in a fixed 25-byte ASCII label
 with no ambiguity at any leap-second boundary. The
 `TAI-Leap-Seconds` header carries the offset as informational
-guidance; clients requiring UTC equivalence for high-stakes
-decisions SHOULD source the offset from a trusted table rather
-than relying solely on the server-supplied value
+guidance; clients requiring UTC equivalence MUST source the offset
+from a trusted table rather than from the server
 (see (#leap-second-reporting)).
 
 ## Why the External Representation
@@ -321,6 +320,12 @@ The term "selector" is used in the DKIM
 sense [@?RFC6376]: an opaque, host-scoped label that
 selects one verification key from possibly many
 published under the same host.
+
+The term "client" refers to any HTTP agent that fetches
+the Taistamp resource at `/.well-known/taistamp`.
+
+The term "verifier" refers to a client that performs
+signature verification on a Taistamp response.
 
 HTTP field values defined in this document use
 Structured Field Values [@!RFC9651]. Type annotations
@@ -745,9 +750,9 @@ authentication of the time value.
 ## Threat Model
 
 Taistamp authenticates a single time reading at the
-moment a verifier asks. It does not establish a long-
+moment a client asks. It does not establish a long-
 running synchronised clock and does not bound network
-delay; a verifier is responsible for treating the
+delay; a client is responsible for treating the
 returned label as a measurement subject to the
 round-trip time of its request.
 
@@ -784,7 +789,7 @@ A signature attests that the server emitted a given
 label; it does not attest that the server's clock is
 correct. An operator whose clock is drifting or
 deliberately set wrong will sign whatever label its
-clock produces. Verifiers that depend on Taistamp for
+clock produces. Clients that depend on Taistamp for
 high-stakes decisions SHOULD compare readings from
 multiple independently operated services.
 
@@ -795,7 +800,7 @@ signed payload as `leap-u32be`; the signature attests
 that the server emitted this specific value, but not
 that it is correct. An operator whose leap-second
 table is wrong, or who deliberately sets it wrong,
-will sign whatever count they emit. Verifiers that
+will sign whatever count they emit. Clients that
 care about UTC equivalence MUST source the TAI-to-UTC
 offset from a trusted table rather than from the
 server.
