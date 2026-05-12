@@ -827,16 +827,18 @@ limit this window to at most one TTL interval.
 Operators who require a short revocation window
 SHOULD configure a low DNS TTL on key records.
 
-## Verifier Re-fetch Side Channel
+## Selector-Based DNS Amplification
 
-A verifier that re-fetches a DNS TXT record when cached-key
-verification fails (see (#verifier-key-caching)) may be induced
-to issue many DNS queries. An attacker who floods a verifier with
-responses signed under unknown or rapidly rotating selectors can
-trigger one DNS lookup per response, amplifying traffic into DNS
-query load on the verifier's resolver. Verifiers SHOULD apply
-rate-limiting or exponential back-off on TXT record re-fetches
-for any given `<selector>._taistamp.<host>` name.
+A verifier that performs one DNS lookup per incoming response
+bearing an unknown or unrecognised selector amplifies query load
+onto the authoritative server publishing the `_taistamp.<host>`
+TXT records. Two cases arise: cached-key verification failure
+triggers a re-fetch per (#verifier-key-caching); a previously
+unseen selector triggers a first-time lookup, which the per-name
+re-fetch limit does not bound. Verifiers MUST apply rate-limiting
+or exponential back-off on all DNS lookups for names under
+`_taistamp.<host>`, regardless of whether the lookup is a first
+fetch or a re-fetch.
 
 # IANA Considerations
 
