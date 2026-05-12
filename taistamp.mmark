@@ -520,10 +520,12 @@ A signed successful response carries two additional headers:
 
 The selector MUST match the following ABNF production
 [@!RFC5234] so that it forms a single, DNS-safe label
+conforming to the LDH rule of [@!RFC1035] (Section 2.3.1)
 and is a valid sf-token [@!RFC9651]:
 
 ~~~
-selector = ALPHA *62( ALPHA / DIGIT / "-" / "_" )
+selector = ALPHA [ *61( ALPHA / DIGIT / "-" )
+                   ( ALPHA / DIGIT ) ]
 ~~~
 
 `TAI-Key-Selector` is a singleton field
