@@ -70,7 +70,7 @@ a 25-byte TAI64N [@!TAI64] label over HTTP, with an
 optional Ed25519 [@!RFC8032] signature bound to a
 client-supplied nonce. Verification keys are published
 in DNS as TXT records under a DKIM-style [@?RFC6376]
-selector, so a verifier can rotate keys without
+selector, so keys can be rotated without
 coordinating with clients.
 
 The protocol is deliberately small. A compliant
@@ -140,11 +140,11 @@ Key rotation therefore requires a client update or a
 coordinated key-distribution mechanism outside the
 protocol.
 
-Taistamp instead publishes verification keys as DNS TXT
+Taistamp operators instead publish verification keys as DNS TXT
 records under a DKIM-inspired [@?RFC6376] selector
-scheme. An operator rotates a key by publishing a new
-TXT record under a new selector and reconfiguring the
-server; no client coordination is required. A verifier
+scheme; they rotate a key by publishing a new TXT record
+under a new selector and reconfiguring the server, with
+no client coordination required. A client
 that has cached a signed response can continue to verify
 it as long as the TXT record at the old selector remains
 in DNS. DNSSEC [@?RFC4033] can protect the key material
@@ -368,6 +368,9 @@ response body, a signature cannot be verified
 without it; `HEAD` is therefore useful only as a
 liveness or configuration probe.
 
+`OPTIONS` responses MUST NOT carry any `TAI-*` response
+header and MUST NOT be signed.
+
 ## Cross-Origin Resource Sharing
 
 A Taistamp server intended for access from browser pages
@@ -398,9 +401,6 @@ cache lifetimes diverge significantly across
 implementations, which may cause a pre-flight
 request to precede every cross-origin GET in
 high-traffic deployments.
-
-`OPTIONS` responses MUST NOT carry `TAI-Key-Selector` or
-`TAI-Signature` and MUST NOT be signed.
 
 ## Successful Response
 
@@ -449,8 +449,8 @@ as unsigned regardless of whether `TAI-Signature` is present.
 
 A client MAY send a request header `TAI-Nonce` carrying
 an opaque byte string encoded as a Structured Field
-Binary [@!RFC9651]. If present, the server MUST echo
-the header verbatim on the response. `TAI-Nonce` is a
+Binary [@!RFC9651]. If present on a `GET` request, the server
+MUST echo the header verbatim on the response. `TAI-Nonce` is a
 singleton field (Section 5.5 of [@?RFC9110]) and MUST
 NOT appear more than once in a request or response. A
 recipient that encounters more than one instance MUST
@@ -802,8 +802,8 @@ signed payload as `leap-u32be`; the signature attests
 that the server emitted this specific value, but not
 that it is correct. An operator whose leap-second
 table is wrong, or who deliberately sets it wrong,
-will sign whatever count they emit. Clients that
-care about UTC equivalence MUST source the TAI-to-UTC
+will sign whatever count they emit. Clients who
+require UTC equivalence MUST source the TAI-to-UTC
 offset from a trusted table rather than from the
 server.
 
