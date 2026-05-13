@@ -70,7 +70,7 @@ a 25-byte TAI64N [@!TAI64] label over HTTP, with an
 optional Ed25519 [@!RFC8032] signature bound to a
 client-supplied nonce. Verification keys are published
 in DNS as TXT records under a DKIM-style [@?RFC6376]
-selector, so a verifier can rotate keys without
+selector, so keys can be rotated without
 coordinating with clients.
 
 The protocol is deliberately small. A compliant
@@ -140,11 +140,11 @@ Key rotation therefore requires a client update or a
 coordinated key-distribution mechanism outside the
 protocol.
 
-Taistamp instead publishes verification keys as DNS TXT
+Taistamp operators instead publish verification keys as DNS TXT
 records under a DKIM-inspired [@?RFC6376] selector
-scheme. An operator rotates a key by publishing a new
-TXT record under a new selector and reconfiguring the
-server; no client coordination is required. A verifier
+scheme; they rotate a key by publishing a new TXT record
+under a new selector and reconfiguring the server, with
+no client coordination required. A client
 that has cached a signed response can continue to verify
 it as long as the TXT record at the old selector remains
 in DNS. DNSSEC [@?RFC4033] can protect the key material
@@ -172,9 +172,8 @@ TAI [@!TAI64] is strictly monotonic. TAI64N encodes TAI
 seconds and nanoseconds in a fixed 25-byte ASCII label
 with no ambiguity at any leap-second boundary. The
 `TAI-Leap-Seconds` header carries the offset as informational
-guidance; clients requiring UTC equivalence for high-stakes
-decisions SHOULD source the offset from a trusted table rather
-than relying solely on the server-supplied value
+guidance; clients requiring UTC equivalence MUST source the offset
+from a trusted table rather than from the server
 (see (#leap-second-reporting)).
 
 ## Why the External Representation
@@ -322,6 +321,12 @@ sense [@?RFC6376]: an opaque, host-scoped label that
 selects one verification key from possibly many
 published under the same host.
 
+The term "client" refers to any HTTP agent that fetches
+the Taistamp resource at `/.well-known/taistamp`.
+
+The term "verifier" refers to a client that performs
+signature verification on a Taistamp response.
+
 HTTP field values defined in this document use
 Structured Field Values [@!RFC9651]. Type annotations
 (Integer, Binary, Token) refer to the item types
@@ -363,6 +368,9 @@ response body, a signature cannot be verified
 without it; `HEAD` is therefore useful only as a
 liveness or configuration probe.
 
+`OPTIONS` responses MUST NOT carry any `TAI-*` response
+header and MUST NOT be signed.
+
 ## Cross-Origin Resource Sharing
 
 A Taistamp server intended for access from browser pages
@@ -393,9 +401,6 @@ cache lifetimes diverge significantly across
 implementations, which may cause a pre-flight
 request to precede every cross-origin GET in
 high-traffic deployments.
-
-`OPTIONS` responses MUST NOT carry `TAI-Key-Selector` or
-`TAI-Signature` and MUST NOT be signed.
 
 ## Successful Response
 
@@ -444,8 +449,8 @@ as unsigned regardless of whether `TAI-Signature` is present.
 
 A client MAY send a request header `TAI-Nonce` carrying
 an opaque byte string encoded as a Structured Field
-Binary [@!RFC9651]. If present, the server MUST echo
-the header verbatim on the response. `TAI-Nonce` is a
+Binary [@!RFC9651]. If present on a `GET` request, the server
+MUST echo the header verbatim on the response. `TAI-Nonce` is a
 singleton field (Section 5.5 of [@?RFC9110]) and MUST
 NOT appear more than once in a request or response. A
 recipient that encounters more than one instance MUST
@@ -515,10 +520,12 @@ A signed successful response carries two additional headers:
 
 The selector MUST match the following ABNF production
 [@!RFC5234] so that it forms a single, DNS-safe label
+conforming to the LDH rule of [@!RFC1035] (Section 2.3.1)
 and is a valid sf-token [@!RFC9651]:
 
 ~~~
-selector = ALPHA *62( ALPHA / DIGIT / "-" / "_" )
+selector = ALPHA [ *61( ALPHA / DIGIT / "-" )
+                   ( ALPHA / DIGIT ) ]
 ~~~
 
 `TAI-Key-Selector` is a singleton field
@@ -745,9 +752,9 @@ authentication of the time value.
 ## Threat Model
 
 Taistamp authenticates a single time reading at the
-moment a verifier asks. It does not establish a long-
+moment a client asks. It does not establish a long-
 running synchronised clock and does not bound network
-delay; a verifier is responsible for treating the
+delay; a client is responsible for treating the
 returned label as a measurement subject to the
 round-trip time of its request.
 
@@ -784,7 +791,7 @@ A signature attests that the server emitted a given
 label; it does not attest that the server's clock is
 correct. An operator whose clock is drifting or
 deliberately set wrong will sign whatever label its
-clock produces. Verifiers that depend on Taistamp for
+clock produces. Clients that depend on Taistamp for
 high-stakes decisions SHOULD compare readings from
 multiple independently operated services.
 
@@ -795,8 +802,8 @@ signed payload as `leap-u32be`; the signature attests
 that the server emitted this specific value, but not
 that it is correct. An operator whose leap-second
 table is wrong, or who deliberately sets it wrong,
-will sign whatever count they emit. Verifiers that
-care about UTC equivalence MUST source the TAI-to-UTC
+will sign whatever count they emit. Clients who
+require UTC equivalence MUST source the TAI-to-UTC
 offset from a trusted table rather than from the
 server.
 
@@ -820,16 +827,18 @@ limit this window to at most one TTL interval.
 Operators who require a short revocation window
 SHOULD configure a low DNS TTL on key records.
 
-## Verifier Re-fetch Side Channel
+## Selector-Based DNS Amplification
 
-A verifier that re-fetches a DNS TXT record when cached-key
-verification fails (see (#verifier-key-caching)) may be induced
-to issue many DNS queries. An attacker who floods a verifier with
-responses signed under unknown or rapidly rotating selectors can
-trigger one DNS lookup per response, amplifying traffic into DNS
-query load on the verifier's resolver. Verifiers SHOULD apply
-rate-limiting or exponential back-off on TXT record re-fetches
-for any given `<selector>._taistamp.<host>` name.
+A verifier that performs one DNS lookup per incoming response
+bearing an unknown or unrecognised selector amplifies query load
+onto the authoritative server publishing the `_taistamp.<host>`
+TXT records. Two cases arise: cached-key verification failure
+triggers a re-fetch per (#verifier-key-caching); a previously
+unseen selector triggers a first-time lookup, which the per-name
+re-fetch limit does not bound. Verifiers MUST apply rate-limiting
+or exponential back-off on all DNS lookups for names under
+`_taistamp.<host>`, regardless of whether the lookup is a first
+fetch or a re-fetch.
 
 # IANA Considerations
 
