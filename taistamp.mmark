@@ -5,7 +5,7 @@ ipr = "trust200902"
 area = "Applications"
 submissiontype = "independent"
 keyword = ["TAI64N", "TAI", "time", "Ed25519", "well-known", "DKIM"]
-date = 2026-05-13T11:47:14Z
+date = 2026-05-13T12:23:23Z
 
 [seriesInfo]
 name = "Internet-Draft"
@@ -21,11 +21,6 @@ organization = "Apptly Software Ltd"
   [author.address]
   email = "amery@apptly.co"
   uri = "https://apptly.co"
-  [author.address.postal]
-  street = "28 Melrose Avenue"
-  city = "Brighton"
-  code = "BN41 2LS"
-  country = "United Kingdom"
 
 [[author]]
 initials = "K. G."
@@ -91,7 +86,7 @@ all serve and consume HTTP without additional
 infrastructure. Port 443 (or 80) is open where
 UDP 123 (NTP), UDP 2002 (Roughtime, port
 assignment pending), and UDP 4014
-(TAICLOCK [@TAICLOCK]) are commonly firewalled.
+(TAICLOCK [@?TAICLOCK]) are commonly firewalled.
 A compliant Taistamp server requires nothing beyond a
 single request handler; a compliant client requires
 nothing beyond an HTTP library, both of which exist in
@@ -180,7 +175,7 @@ from a trusted table rather than from the server
 
 ## Why the External Representation
 
-TAICLOCK [@TAICLOCK] encodes timestamps as 16 bytes of
+TAICLOCK [@?TAICLOCK] encodes timestamps as 16 bytes of
 binary TAI64NA (8 bytes of seconds, 4 of nanoseconds,
 4 of attoseconds). Taistamp instead uses the TAI64N
 external representation [@!TAI64]: the ASCII character
@@ -263,7 +258,7 @@ not artefacts.
 
 # Relation to Other Protocols
 
-**TAICLOCK [@TAICLOCK]** is D. J. Bernstein's UDP-based
+**TAICLOCK [@?TAICLOCK]** is D. J. Bernstein's UDP-based
 TAI64N time service (IANA port 4014). A client sends a
 packet between 20 and 256 bytes whose first four bytes
 are the ASCII string `ctai`; the server echoes the
@@ -337,7 +332,7 @@ defined in that specification.
 # Resource
 
 A Taistamp service is reached at the well-known
-URI [@?RFC8615]:
+URI [@!RFC8615]:
 
 ~~~
 /.well-known/taistamp
@@ -847,7 +842,7 @@ fetch or a re-fetch.
 ## Well-Known URI
 
 IANA is requested to register the following entry in
-the "Well-Known URIs" registry [@?RFC8615]:
+the "Well-Known URIs" registry [@!RFC8615]:
 
 | Field | Value |
 |-------|-------|
