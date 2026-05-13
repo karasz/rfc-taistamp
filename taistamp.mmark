@@ -5,7 +5,7 @@ ipr = "trust200902"
 area = "Applications"
 submissiontype = "independent"
 keyword = ["TAI64N", "TAI", "time", "Ed25519", "well-known", "DKIM"]
-date = 2026-05-04T14:49:35Z
+date = 2026-05-13T11:47:14Z
 
 [seriesInfo]
 name = "Internet-Draft"
@@ -20,7 +20,7 @@ fullname = "Alejandro Mery"
 organization = "Apptly Software Ltd"
   [author.address]
   email = "amery@apptly.co"
-  uri = "https://apptly.co/"
+  uri = "https://apptly.co"
   [author.address.postal]
   street = "28 Melrose Avenue"
   city = "Brighton"
@@ -31,8 +31,10 @@ organization = "Apptly Software Ltd"
 initials = "K. G."
 surname = "Nagy"
 fullname = "Károly Gábriel Nagy"
+organization = "Apptly Software Ltd"
   [author.address]
   email = "nagy.karoly@apptly.co"
+  uri = "https://apptly.co"
 %%%
 
 .# Abstract
