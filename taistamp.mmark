@@ -5,7 +5,7 @@ ipr = "trust200902"
 area = "Applications"
 submissiontype = "independent"
 keyword = ["TAI64N", "TAI", "time", "Ed25519", "well-known", "DKIM"]
-date = 2026-05-13T12:23:23Z
+date = 2026-05-13T12:49:33Z
 
 [seriesInfo]
 name = "Internet-Draft"
@@ -847,7 +847,7 @@ the "Well-Known URIs" registry [@!RFC8615]:
 | Field | Value |
 |-------|-------|
 | URI Suffix | `taistamp` |
-| Change Controller | IETF |
+| Change Controller | Apptly Software Ltd |
 | Reference | This document |
 | Status | permanent |
 | Related Information | none |
@@ -871,7 +871,7 @@ per [@?RFC6838]:
 - Fragment identifier considerations: none
 - Restrictions on usage: none
 - Provisional registration: no
-- Author/Change controller: IETF
+- Author/Change controller: Apptly Software Ltd
 
 ## Header Fields
 
