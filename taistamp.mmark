@@ -40,7 +40,8 @@ optionally signed with Ed25519. The service is reached
 at the well-known URI `/.well-known/taistamp` and is
 intended for clients that need an authenticated
 wall-clock reading without running an NTP stack or
-trusting an unauthenticated TLS handshake clock. The
+relying on the client's own clock for TLS certificate
+validation. The
 signing scheme uses a length-prefixed, domain-separated
 framing and publishes verification keys as DNS TXT
 records in a DKIM-inspired selector layout.
@@ -56,11 +57,10 @@ or stamp local events. Two common sources fall short:
 - An NTP client is intrusive on constrained or sandboxed
   runtimes and exposes the device to a separate trust
   domain.
-- The TLS handshake clock is not authenticated by any
-  party the client can name; an attacker who can serve
-  a valid certificate (for instance via a misissued
-  intermediate or via a cooperating CA) can also adjust
-  the apparent time.
+- TLS does not provide an explicit authenticated time
+  value to the client; certificate validity checks
+  depend on the client's existing clock rather than
+  establishing a trustworthy time reading.
 
 Taistamp addresses these by serving the current time as
 a 25-byte TAI64N [@!TAI64] label over HTTP, with an
