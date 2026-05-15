@@ -447,7 +447,9 @@ as unsigned regardless of whether `TAI-Signature` is present.
 A client MAY send a request header `TAI-Nonce` carrying
 an opaque byte string encoded as a Structured Field
 Binary [@!RFC9651]. If present on a `GET` request, the server
-MUST echo the header verbatim on the response. `TAI-Nonce` is a
+MUST include a `TAI-Nonce` response field whose
+`sf-binary` value encodes the same octet sequence
+as the request field. `TAI-Nonce` is a
 singleton field (Section 5.5 of [@?RFC9110]) and MUST
 NOT appear more than once in a request or response. A
 recipient that encounters more than one instance MUST
@@ -492,8 +494,9 @@ bytes encoded as an sf-binary value are sufficient for
 typical use.
 
 A client that included a `TAI-Nonce` in the request
-MUST reject any response that does not echo the nonce
-verbatim and carry a valid `TAI-Signature`; such a
+MUST reject any response whose decoded `TAI-Nonce`
+octets do not match the request nonce, or that does
+not carry a valid `TAI-Signature`; such a
 response MUST be treated as unsigned and, if the
 client requires authentication, discarded. This
 ensures that a network attacker who strips the
@@ -551,17 +554,19 @@ leap-u32be    = 4 octets  ; TAI-Leap-Seconds,
               ;   big-endian unsigned
 selector-len  = 1 octet   ; length of selector-bytes, 1..63
 selector-bytes = 1..63 octets ; the selector, ASCII
-nonce-bytes   = octets    ; the TAI-Nonce header
-              ;   value, verbatim
+nonce-bytes   = octets    ; decoded sf-binary octets
+              ;   of the TAI-Nonce field value
 
 payload = domain-tag label-bytes leap-u32be
           selector-len selector-bytes nonce-bytes
 ~~~
 
-nonce-bytes is the octets of the `TAI-Nonce` HTTP
-field value as transmitted, after standard HTTP
-parser whitespace stripping but before any
-`sf-binary` base64 decoding.
+nonce-bytes is the octet sequence obtained by
+parsing the `TAI-Nonce` field value as an
+`sf-binary` item per [@!RFC9651] and decoding
+the base64 value. The textual representation
+of the field is not part of the signed input;
+only the decoded bytes are signed.
 
 The trailing NUL on `domain-tag` is significant: it
 prevents extension of the tag into adjacent bytes by
@@ -720,8 +725,9 @@ This section applies when the response carries both
 reads the response and reconstructs the framed
 payload as defined in (#signing). The verifier MUST:
 
-1. Confirm that the request `TAI-Nonce` matches the
-   response `TAI-Nonce` byte-for-byte.
+1. Confirm that the decoded `sf-binary` octets of
+   the response `TAI-Nonce` match those of the
+   request `TAI-Nonce`.
 2. Confirm that the `TAI-Key-Selector` value
    is a well-formed selector matching the ABNF
    in (#signing).
