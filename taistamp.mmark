@@ -119,9 +119,11 @@ affinity or shared state.
 
 Taistamp is transported over TCP-based HTTP, which
 rules out UDP-style spoofed-source amplification.
-A signed response at maximum field lengths does not
-exceed 530 bytes regardless of input — the response
-body is a fixed 25 bytes, and the response headers
+The protocol-mandated fields of a signed response
+contribute at most approximately 530 bytes at maximum
+field lengths, excluding transport framing and any
+headers added by intermediaries — the response body
+is a fixed 25 bytes, and the protocol-defined headers
 (`TAI-Nonce` echo, `TAI-Signature`, `TAI-Key-Selector`,
 `TAI-Leap-Seconds`) account for the remainder — an
 attacker cannot induce a response meaningfully larger
@@ -485,8 +487,11 @@ sufficient client-supplied entropy for the replay
 defence in this section. The upper bound of 129
 decoded octets caps the nonce's contribution to
 overall response size; combined with the 25-byte body and
-the other response headers, the total response
-does not exceed 530 bytes. Implementations that require
+the other protocol-defined response headers, the
+protocol-mandated fields contribute at most
+approximately 530 bytes in total, excluding transport
+framing and intermediary-added headers. Implementations
+that require
 larger nonces for compatibility with a higher-entropy
 convention may negotiate a future extension; this
 version of the protocol holds the bounds fixed for
