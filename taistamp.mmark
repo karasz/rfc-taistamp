@@ -519,9 +519,10 @@ A signed successful response carries two additional headers:
 | `TAI-Signature`     | the Ed25519 signature, as an sf-binary |
 
 The selector MUST match the following ABNF production
-[@!RFC5234] so that it forms a single, DNS-safe label
-conforming to the LDH rule of [@!RFC1035] (Section 2.3.1)
-and is a valid sf-token [@!RFC9651]:
+[@!RFC5234]. The grammar is constrained to the subset
+of DNS LDH labels ([@!RFC1035] Section 2.3.1) that are
+also valid sf-tokens ([@!RFC9651]); the leading-ALPHA
+requirement follows from sf-token, not from DNS alone:
 
 ~~~
 selector = ALPHA [ *61( ALPHA / DIGIT / "-" )
