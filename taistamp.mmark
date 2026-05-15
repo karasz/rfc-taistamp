@@ -770,6 +770,15 @@ the nonce, gains no replay protection. Verifiers
 SHOULD generate a fresh, unpredictable nonce for each
 request.
 
+Replay protection is scoped to the verifier's own
+nonce uniqueness enforcement. The protocol does not
+prevent a recorded request/response pair from being
+presented to a second application that does not track
+nonce lifecycle. Verifiers SHOULD treat each signed
+response as valid for a single use and SHOULD NOT
+accept a response whose nonce was issued by a previous
+request.
+
 ## Domain Separation
 
 The `taistamp-v1%x00` prefix prevents an Ed25519 key
