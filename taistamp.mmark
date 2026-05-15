@@ -144,8 +144,9 @@ under a new selector and reconfiguring the server, with
 no client coordination required. A client
 that has cached a signed response can continue to verify
 it as long as the TXT record at the old selector remains
-in DNS. DNSSEC [@?RFC4033] can protect the key material
-end-to-end where the operator controls a signed zone.
+in DNS. DNSSEC [@?RFC4033] protects the key material
+end-to-end and is strongly recommended where the
+operator controls a signed zone.
 
 This approach deliberately trades the ecosystem-level
 misbehaviour detection that Roughtime's multi-server
@@ -791,12 +792,21 @@ Taistamp signing key for any other purpose.
 ## DNS Trust
 
 Verification reduces to trusting the DNS lookup of the
-TXT record at `<selector>._taistamp.<host>`. A
-verifier that does not validate DNS responses (for
-instance via DNSSEC or a trusted resolver path) is
-vulnerable to a DNS attacker who can substitute a
-public key. Operators SHOULD publish under a DNSSEC-
-signed zone where feasible.
+TXT record at `<selector>._taistamp.<host>`. A verifier
+that does not validate DNS responses (for instance via
+DNSSEC or a trusted resolver path) is vulnerable to a
+DNS attacker who can substitute a public key and then
+sign responses with the corresponding private key,
+producing a forged time value that verifies
+successfully. Unlike DKIM, where key substitution
+causes verification failures, here it enables complete
+spoofing. Without authenticated DNS, security reduces
+to transport-level DNS trust, not protocol-level key
+authentication.
+
+Operators SHOULD publish under a DNSSEC-signed zone.
+Verifiers SHOULD validate DNSSEC signatures or use a
+resolver path that provides equivalent guarantees.
 
 ## Clock Manipulation
 
