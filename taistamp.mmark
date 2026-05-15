@@ -471,18 +471,20 @@ whether `TAI-Signature` is present.
 A server MUST NOT interpret the nonce. If a server
 receives a `TAI-Nonce` that is a malformed sf-binary
 it MUST treat the field as absent and MUST NOT sign
-the response. The `TAI-Nonce` field value MUST be
-at least 14 octets and MUST NOT exceed 174 octets.
-14 octets corresponds to `sf-binary` of ~7 raw bytes
-(: + 12 base64 + =-pad + :); 174 corresponds to ~129
-raw bytes.
+the response. The decoded `sf-binary` value MUST contain at least
+7 octets and MUST NOT exceed 129 octets. When
+serialized as `sf-binary`, these correspond exactly
+to field values of 14 octets (: + 12 base64 +
+padding + :) and 174 octets (: + 172 base64 + :)
+respectively; implementations MAY reject on wire
+length before decoding as an optimisation, but the
+normative check is on decoded length.
 
-The lower bound corresponds to ~7 raw bytes of
-client-supplied entropy, which is sufficient
-unpredictability for the replay defence in this
-section. The upper bound corresponds to ~129 raw
-bytes and caps the nonce's contribution to overall
-response size; combined with the 25-byte body and
+The lower bound of 7 decoded octets provides
+sufficient client-supplied entropy for the replay
+defence in this section. The upper bound of 129
+decoded octets caps the nonce's contribution to
+overall response size; combined with the 25-byte body and
 the other response headers, the total response
 does not exceed 530 bytes. Implementations that require
 larger nonces for compatibility with a higher-entropy
