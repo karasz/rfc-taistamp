@@ -813,9 +813,12 @@ multiple independently operated services.
 The `TAI-Leap-Seconds` header is included in the
 signed payload as `leap-u32be`; the signature attests
 that the server emitted this specific value, but not
-that it is correct. An operator whose leap-second
-table is wrong, or who deliberately sets it wrong,
-will sign whatever count they emit. Clients who
+that it is correct. Signing it allows the verifier to
+reconstruct the server's own UTC interpretation of the
+timestamp, even though the verifier need not trust that
+value for UTC conversion purposes. An operator whose
+leap-second table is wrong, or who deliberately sets it
+wrong, will sign whatever count they emit. Clients who
 require UTC equivalence MUST source the TAI-to-UTC
 offset from a trusted table rather than from the
 server.
