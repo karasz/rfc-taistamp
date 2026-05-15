@@ -599,10 +599,10 @@ length is computationally infeasible under the
 existential unforgeability of Ed25519.
 
 The nonce occupies the tail of the payload. Its length
-is therefore self-delimiting: a verifier that has
-recovered `domain-tag`, `label-bytes`, `leap-u32be`,
-`selector-len`, and `selector-bytes` reconstructs the
-nonce as the remaining input.
+is therefore self-delimiting: a verifier computes
+`nonce-bytes` from the decoded `TAI-Nonce` sf-binary
+value and appends it as the final payload component,
+with no explicit length field required.
 
 ## When to Sign
 
