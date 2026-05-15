@@ -71,7 +71,7 @@ selector, so keys can be rotated without
 coordinating with clients.
 
 The protocol is deliberately small. A compliant
-implementation fits in a single fetch handler, has no
+implementation fits in a single HTTP request handler, has no
 state beyond its signing key, and is independent of any
 specific HTTP framework or runtime.
 
@@ -119,14 +119,14 @@ affinity or shared state.
 
 Taistamp is transported over TCP-based HTTP, which
 rules out UDP-style spoofed-source amplification.
-Both request and response are bounded under 1 KB
-regardless of input — the response body is a fixed
-25 bytes, and the response headers (`TAI-Nonce`
-echo, `TAI-Signature`, `TAI-Key-Selector`,
-`TAI-Leap-Seconds`) add at most a few hundred
-octets — an attacker cannot induce a response
-meaningfully larger than the request, so Taistamp
-is not usable as an amplification vector.
+A signed response at maximum field lengths does not
+exceed 530 bytes regardless of input — the response
+body is a fixed 25 bytes, and the response headers
+(`TAI-Nonce` echo, `TAI-Signature`, `TAI-Key-Selector`,
+`TAI-Leap-Seconds`) account for the remainder — an
+attacker cannot induce a response meaningfully larger
+than the request, so Taistamp is not usable as an
+amplification vector.
 
 ## Why DNS-Based Key Discovery
 
@@ -267,8 +267,9 @@ packet with the first byte replaced by `s` and bytes
 4–19 replaced with the current time in TAI64NA format.
 TAICLOCK is the direct conceptual predecessor of
 Taistamp: both serve TAI64N timestamps on demand.
-Taistamp differs in using HTTP (firewall-friendly, no
-dedicated daemon), adding optional Ed25519 signatures,
+Taistamp differs in using HTTP (deployable over existing
+HTTPS infrastructure, no dedicated daemon), adding
+optional Ed25519 signatures,
 and publishing keys via DNS rather than relying on the
 transport for integrity.
 
@@ -364,7 +365,11 @@ response, with the exception that `TAI-Nonce`,
 be present. Because the signed payload covers the
 response body, a signature cannot be verified
 without it; `HEAD` is therefore useful only as a
-liveness or configuration probe.
+liveness or configuration probe. Note that this
+makes `HEAD` responses non-equivalent to the
+corresponding `GET` response in the sense of
+[@?RFC9110] Section 9.3.2; carrying an unverifiable
+signature on a bodyless response would be misleading.
 
 `OPTIONS` responses MUST NOT carry any `TAI-*` response
 header and MUST NOT be signed.
@@ -479,7 +484,7 @@ section. The upper bound corresponds to ~129 raw
 bytes and caps the nonce's contribution to overall
 response size; combined with the 25-byte body and
 the other response headers, the total response
-stays well under 1 KB. Implementations that require
+does not exceed 530 bytes. Implementations that require
 larger nonces for compatibility with a higher-entropy
 convention may negotiate a future extension; this
 version of the protocol holds the bounds fixed for
