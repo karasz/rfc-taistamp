@@ -5,7 +5,7 @@ ipr = "trust200902"
 area = "Applications"
 submissiontype = "independent"
 keyword = ["TAI64N", "TAI", "time", "Ed25519", "well-known", "DKIM"]
-date = 2026-05-13T12:49:33Z
+date = 2026-05-15T11:01:51Z
 
 [seriesInfo]
 name = "Internet-Draft"
@@ -506,16 +506,41 @@ network observer when freshness matters; 16 random
 bytes encoded as an sf-binary value are sufficient for
 typical use.
 
-A client that included a `TAI-Nonce` in the request
-MUST reject any response whose decoded `TAI-Nonce`
-octets do not match the request nonce, or that does
-not carry a valid `TAI-Signature`; such a
-response MUST be treated as unsigned and, if the
-client requires authentication, discarded. This
-ensures that a network attacker who strips the
-`TAI-Nonce` from the request can at most cause a
-denial of service, not a substitution of an
-unauthenticated time value.
+When a client included a `TAI-Nonce` in the request,
+the trust level of the response is determined as follows.
+If the response carries no `TAI-Nonce` field, the response
+is Plain (level 0) regardless of whether a signature is
+present; a conformant server only signs responses that echo
+a nonce (see (#signing)), so any signature in such a
+response MUST be ignored. If the response carries a
+`TAI-Nonce` whose decoded octets do not match the request
+nonce, the response is Inconsistent (level -1) and MUST be
+rejected regardless of signature state. If the response
+carries a `TAI-Nonce` whose decoded octets match the request
+nonce, the trust level depends on the signature state as
+defined in (#trust-levels). A signature is Unknown when
+`TAI-Key-Selector` is present but does not resolve in DNS.
+These cases are summarised in the following table.
+
+~~~
++----------------+---------+-----------+--------------+-------+
+| Response nonce | Matches | Signature | Outcome      | Level |
++----------------+---------+-----------+--------------+-------+
+| Absent         | N/A     | Any       | Plain        |  0    |
+| Present        | No      | Any       | Inconsistent | -1    |
+| Present        | Yes     | Absent    | Unique       |  1    |
+| Present        | Yes     | Unknown   | Unique       |  1    |
+| Present        | Yes     | Invalid   | Inconsistent | -1    |
+| Present        | Yes     | Valid     | Signed       |  2    |
++----------------+---------+-----------+--------------+-------+
+~~~
+Figure: Client trust level by response nonce and signature state.
+
+A network attacker who strips the `TAI-Nonce` from the
+outgoing request causes the server to respond at level 0.
+A client that requires level 1 or above treats this as a
+denial of service; a client that accepts level 0 receives
+no freshness guarantee.
 
 # Signing
 
@@ -754,18 +779,51 @@ payload as defined in (#signing). The verifier MUST:
 4. Verify the Ed25519 signature using the public key
    from `p` over the framed payload.
 
-Steps 1, 2, 3 and 4 MUST all succeed. A verifier MUST
-NOT accept a label whose signature is absent or whose
-signature does not verify.
+Each step produces a trust level outcome. If step 1 fails
+(nonce mismatch), the response is Inconsistent (level -1)
+and MUST be rejected. If step 2 fails (malformed selector)
+or step 3 yields no DNS record (unknown selector),
+signature verification stops and the response is Unique
+(level 1). If step 4 fails (signature does not verify),
+the response is Inconsistent (level -1) and MUST be
+rejected. If all four steps succeed, the response is
+Signed (level 2). Trust levels are defined in
+(#trust-levels).
 
 Verifiers MUST use the strict verification procedure
 described in Section 5.1.7 of [@!RFC8032].
 
-A verifier that does not implement the optional
-signature path MAY still consume the unsigned label,
-provided it understands that it is trusting the
-underlying transport with no protocol-level
-authentication of the time value.
+# Trust Levels
+
+A Taistamp response is assigned one of four trust levels,
+combining the nonce echo result and the signature state.
+
+**Level 2 — Signed.** The response `TAI-Nonce` matches the
+request nonce and the `TAI-Signature` verifies against the
+public key resolved from `TAI-Key-Selector`. The time value
+is both fresh and authenticated.
+
+**Level 1 — Unique.** The response `TAI-Nonce` matches the
+request nonce, but the signature is absent or the
+`TAI-Key-Selector` does not resolve in DNS. The time value
+is fresh but unauthenticated. An unresolvable selector
+indicates the signing key has not yet propagated in DNS;
+this is a soft degradation, not a failure.
+
+**Level 0 — Plain.** The response carries no echoed
+`TAI-Nonce`. The time value carries no freshness or
+authentication guarantee from this protocol.
+
+**Level -1 — Inconsistent.** Either the response
+`TAI-Nonce` is present but does not match the request
+nonce, or the `TAI-Key-Selector` resolves but the
+`TAI-Signature` does not verify. The response MUST be
+rejected.
+
+A client MUST NOT use a response at trust level -1.
+Whether a client accepts level 0 or level 1 when a higher
+level is expected is an application policy decision outside
+the scope of this document.
 
 # Security Considerations
 
