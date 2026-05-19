@@ -5,7 +5,7 @@ ipr = "trust200902"
 area = "Applications"
 submissiontype = "independent"
 keyword = ["TAI64N", "TAI", "time", "Ed25519", "well-known", "DKIM"]
-date = 2026-05-13T12:49:33Z
+date = 2026-05-15T11:01:51Z
 
 [seriesInfo]
 name = "Internet-Draft"
@@ -506,16 +506,43 @@ network observer when freshness matters; 16 random
 bytes encoded as an sf-binary value are sufficient for
 typical use.
 
-A client that included a `TAI-Nonce` in the request
-MUST reject any response whose decoded `TAI-Nonce`
-octets do not match the request nonce, or that does
-not carry a valid `TAI-Signature`; such a
-response MUST be treated as unsigned and, if the
-client requires authentication, discarded. This
-ensures that a network attacker who strips the
-`TAI-Nonce` from the request can at most cause a
-denial of service, not a substitution of an
-unauthenticated time value.
+When a client included a `TAI-Nonce` in the request,
+the trust level of the response is determined as follows.
+If the response carries no `TAI-Nonce` field, the response
+is Plain (level 0) regardless of whether a signature is
+present; a conformant server only signs responses that echo
+a nonce (see (#signing)), so any signature in such a
+response MUST be ignored. If the response carries a
+`TAI-Nonce` whose decoded octets do not match the request
+nonce, the response is Inconsistent (level -1) and MUST be
+rejected regardless of signature state. If the response
+carries a `TAI-Nonce` whose decoded octets match the request
+nonce, the trust level depends on the key/signature state as
+defined in (#trust-levels). The key/signature state is
+Unresolvable when `TAI-Key-Selector` is malformed or
+present but does not resolve in DNS.
+These cases are summarised in the following table.
+
+~~~
++----------------+---------+--------------+--------------+-------+
+| Response nonce | Matches | Key/Sig      | Outcome      | Level |
++----------------+---------+--------------+--------------+-------+
+| Absent         | N/A     | Any          | Plain        |  0    |
+| Present        | No      | Any          | Inconsistent | -1    |
+| Present        | Yes     | Absent       | Unique       |  1    |
+| Present        | Yes     | Malformed    | Unique       |  1    |
+| Present        | Yes     | Unresolvable | Unique       |  1    |
+| Present        | Yes     | Invalid      | Inconsistent | -1    |
+| Present        | Yes     | Valid        | Signed       |  2    |
++----------------+---------+--------------+--------------+-------+
+~~~
+Figure: Client trust level by response nonce and key/signature state.
+
+A network attacker who strips the `TAI-Nonce` from the
+outgoing request causes the server to respond at level 0.
+A client that requires level 1 or above treats this as a
+denial of service; a client that accepts level 0 receives
+no freshness guarantee.
 
 # Signing
 
@@ -558,6 +585,11 @@ response. A recipient that encounters more than one
 instance MUST treat the field as absent per Section
 4.2 of [@!RFC9651]; the response MUST then be treated
 as unsigned.
+
+A response that carries `TAI-Signature` without
+`TAI-Key-Selector` MUST be treated as unsigned; the
+absent selector yields key/signature state Absent, as
+if no signature were present.
 
 ## Framed Payload
 
@@ -735,6 +767,40 @@ Operators who require rapid revocation SHOULD
 configure a short TTL on key records, accepting the
 trade-off of increased DNS query load.
 
+# Trust Levels
+
+A Taistamp response is assigned one of four trust levels,
+combining the nonce echo result and the key/signature state.
+
+**Level 2 — Signed.** The response `TAI-Nonce` matches the
+request nonce and the `TAI-Signature` verifies against the
+public key resolved from `TAI-Key-Selector`. The time value
+is both fresh and authenticated.
+
+**Level 1 — Unique.** The response `TAI-Nonce` matches the
+request nonce, but the signature is absent, the
+`TAI-Key-Selector` is malformed, or the `TAI-Key-Selector`
+does not resolve in DNS. The time value is fresh but
+unauthenticated. A malformed or unresolvable selector
+indicates a configuration error or that the signing key has
+not yet propagated in DNS; this is a soft degradation, not
+a failure.
+
+**Level 0 — Plain.** The response carries no echoed
+`TAI-Nonce`. The time value carries no freshness or
+authentication guarantee from this protocol.
+
+**Level -1 — Inconsistent.** Either the response
+`TAI-Nonce` is present but does not match the request
+nonce, or the `TAI-Key-Selector` resolves but the
+`TAI-Signature` does not verify. The response MUST be
+rejected.
+
+A client MUST NOT use a response at trust level -1.
+Whether a client accepts level 0 or level 1 when a higher
+level is expected is an application policy decision outside
+the scope of this document.
+
 # Verification
 
 This section applies when the response carries both
@@ -754,18 +820,19 @@ payload as defined in (#signing). The verifier MUST:
 4. Verify the Ed25519 signature using the public key
    from `p` over the framed payload.
 
-Steps 1, 2, 3 and 4 MUST all succeed. A verifier MUST
-NOT accept a label whose signature is absent or whose
-signature does not verify.
+Each step produces a trust level outcome. If step 1 fails
+(nonce mismatch), the response is Inconsistent (level -1)
+and MUST be rejected. If step 2 fails (malformed selector)
+or step 3 yields no DNS record (unresolvable selector),
+signature verification stops and the response is Unique
+(level 1). If step 4 fails (signature does not verify),
+the response is Inconsistent (level -1) and MUST be
+rejected. If all four steps succeed, the response is
+Signed (level 2). Trust levels are defined in
+(#trust-levels).
 
 Verifiers MUST use the strict verification procedure
 described in Section 5.1.7 of [@!RFC8032].
-
-A verifier that does not implement the optional
-signature path MAY still consume the unsigned label,
-provided it understands that it is trusting the
-underlying transport with no protocol-level
-authentication of the time value.
 
 # Security Considerations
 
@@ -776,25 +843,31 @@ moment a client asks. It does not establish a long-
 running synchronised clock and does not bound network
 delay; a client is responsible for treating the
 returned label as a measurement subject to the
-round-trip time of its request.
+round-trip time of its request. The trust level
+framework (see (#trust-levels)) expresses the combined
+freshness and authentication guarantees that a response
+carries.
 
 ## Replay
 
 A response is bound to its request only via the
 `TAI-Nonce` echo and its inclusion in the signed
-payload. A verifier that reuses a nonce, or that omits
-the nonce, gains no replay protection. Verifiers
+payload. A client that omits the nonce receives a
+Plain (level 0) response with no freshness guarantee.
+A client that reuses a nonce across requests gains no
+replay protection even at level 1 or 2, since the nonce
+no longer uniquely identifies the exchange. Clients
 SHOULD generate a fresh, unpredictable nonce for each
 request.
 
-Replay protection is scoped to the verifier's own
-nonce uniqueness enforcement. The protocol does not
-prevent a recorded request/response pair from being
-presented to a second application that does not track
-nonce lifecycle. Verifiers SHOULD treat each signed
-response as valid for a single use and SHOULD NOT
-accept a response whose nonce was issued by a previous
-request.
+Replay protection is scoped to the client's own nonce
+uniqueness enforcement. The protocol does not prevent
+a recorded request/response pair from being presented
+to a second application that does not track nonce
+lifecycle. Clients SHOULD treat each Unique (level 1)
+or Signed (level 2) response as valid for a single use
+and SHOULD NOT accept a response whose nonce was issued
+by a previous request.
 
 ## Domain Separation
 
@@ -806,18 +879,21 @@ Taistamp signing key for any other purpose.
 
 ## DNS Trust
 
-Verification reduces to trusting the DNS lookup of the
-TXT record at `<selector>._taistamp.<host>`. A verifier
-that does not validate DNS responses (for instance via
-DNSSEC or a trusted resolver path) is vulnerable to a
-DNS attacker who can substitute a public key and then
-sign responses with the corresponding private key,
-producing a forged time value that verifies
-successfully. Unlike DKIM, where key substitution
-causes verification failures, here it enables complete
-spoofing. Without authenticated DNS, security reduces
-to transport-level DNS trust, not protocol-level key
-authentication.
+A Signed (level 2) response reduces to trusting the
+DNS lookup of the TXT record at
+`<selector>._taistamp.<host>`. A verifier that does not
+validate DNS responses (for instance via DNSSEC or a
+trusted resolver path) is vulnerable to a DNS attacker
+who can substitute a public key and then sign responses
+with the corresponding private key, producing a forged
+time value that verifies successfully. Unlike DKIM,
+where key substitution causes verification failures,
+here it enables complete spoofing. Without authenticated
+DNS, a response that appears Signed (level 2) provides
+no stronger guarantee than Unique (level 1). A Unique
+(level 1) response does not involve DNS key resolution
+and is therefore not subject to this attack, though it
+provides no key authentication.
 
 Operators SHOULD publish under a DNSSEC-signed zone.
 Verifiers SHOULD validate DNSSEC signatures or use a
@@ -851,35 +927,39 @@ server.
 ## Key Revocation Window
 
 When a TXT record is deleted to revoke a compromised
-key, verifiers that have cached the corresponding
-public key will continue to accept signatures made
-with that key until their cached entry's DNS TTL
-expires. An attacker in possession of the compromised
-private key can forge valid signatures during this
-window; the forged signatures will verify successfully
-against the cached key, giving the verifier no
-indication that the key has been revoked.
+key, verifiers that have cached the corresponding public
+key will continue to assign Signed (level 2) to
+responses made with that key until their cached entry's
+DNS TTL expires. An attacker in possession of the
+compromised private key can forge responses during this
+window; the forged signatures will verify against the
+cached key, assigning Signed (level 2) when the correct
+assignment — given the revoked key — would be Unique
+(level 1) at best.
 
 The exposure window is bounded by the DNS TTL
 remaining on the cached entry at the moment of
-revocation. Verifiers that honour the TTL limit
-required by (#verifier-key-caching) will naturally
-limit this window to at most one TTL interval.
-Operators who require a short revocation window
-SHOULD configure a low DNS TTL on key records.
+revocation. Verifiers that honour the TTL limit required
+by (#verifier-key-caching) will naturally limit this
+window to at most one TTL interval. Operators who
+require a short revocation window SHOULD configure a
+low DNS TTL on key records.
 
 ## Selector-Based DNS Amplification
 
 A verifier that performs one DNS lookup per incoming response
-bearing an unknown or unrecognised selector amplifies query load
-onto the authoritative server publishing the `_taistamp.<host>`
-TXT records. Two cases arise: cached-key verification failure
-triggers a re-fetch per (#verifier-key-caching); a previously
-unseen selector triggers a first-time lookup, which the per-name
-re-fetch limit does not bound. Verifiers MUST apply rate-limiting
-or exponential back-off on all DNS lookups for names under
-`_taistamp.<host>`, regardless of whether the lookup is a first
-fetch or a re-fetch.
+carrying a selector that is malformed or does not resolve
+(Unresolvable key/signature state, yielding Unique (level 1)
+per (#trust-levels)) amplifies
+query load onto the authoritative server publishing the
+`_taistamp.<host>` TXT records. Two cases arise: a cached key
+that fails verification triggers a re-fetch per
+(#verifier-key-caching); a previously unseen selector triggers
+a first-time lookup, which the per-name re-fetch limit does not
+bound. Verifiers MUST apply rate-limiting or exponential back-off
+on all DNS lookups for names under `_taistamp.<host>`,
+regardless of whether the lookup is a first fetch or a
+re-fetch.
 
 ## Caching Intermediaries
 
@@ -890,16 +970,19 @@ Successful `GET` responses carry `Cache-Control: no-store`
 not to retain or serve the response from cache. However,
 CDN and proxy configurations sometimes override this
 directive, for instance via path-based cache rules that
-match `/.well-known/` resources. A cached Taistamp response
-silently delivers a frozen time value to all subsequent
-clients without any indication that the reading is stale.
+match `/.well-known/` resources. A client that included a
+`TAI-Nonce` is protected: a cached response carries a
+different nonce, producing Inconsistent (level -1), which
+MUST be rejected. A client that did not include a `TAI-Nonce`
+receives a Plain (level 0) response with no indication that
+the time value is stale.
 
 Operators deploying Taistamp behind a CDN or reverse
 proxy SHOULD explicitly configure the intermediary to
 pass `GET` responses to `/.well-known/taistamp` through
 without caching, and SHOULD verify this behaviour
-before relying on signed responses for time-sensitive
-decisions.
+before relying on Signed (level 2) responses for
+time-sensitive decisions.
 
 # IANA Considerations
 
