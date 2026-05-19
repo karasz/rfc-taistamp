@@ -40,7 +40,8 @@ optionally signed with Ed25519. The service is reached
 at the well-known URI `/.well-known/taistamp` and is
 intended for clients that need an authenticated
 wall-clock reading without running an NTP stack or
-trusting an unauthenticated TLS handshake clock. The
+relying on the client's own clock for TLS certificate
+validation. The
 signing scheme uses a length-prefixed, domain-separated
 framing and publishes verification keys as DNS TXT
 records in a DKIM-inspired selector layout.
@@ -56,11 +57,10 @@ or stamp local events. Two common sources fall short:
 - An NTP client is intrusive on constrained or sandboxed
   runtimes and exposes the device to a separate trust
   domain.
-- The TLS handshake clock is not authenticated by any
-  party the client can name; an attacker who can serve
-  a valid certificate (for instance via a misissued
-  intermediate or via a cooperating CA) can also adjust
-  the apparent time.
+- TLS does not provide an explicit authenticated time
+  value to the client; certificate validity checks
+  depend on the client's existing clock rather than
+  establishing a trustworthy time reading.
 
 Taistamp addresses these by serving the current time as
 a 25-byte TAI64N [@!TAI64] label over HTTP, with an
@@ -71,7 +71,7 @@ selector, so keys can be rotated without
 coordinating with clients.
 
 The protocol is deliberately small. A compliant
-implementation fits in a single fetch handler, has no
+implementation fits in a single HTTP request handler, has no
 state beyond its signing key, and is independent of any
 specific HTTP framework or runtime.
 
@@ -119,14 +119,16 @@ affinity or shared state.
 
 Taistamp is transported over TCP-based HTTP, which
 rules out UDP-style spoofed-source amplification.
-Both request and response are bounded under 1 KB
-regardless of input — the response body is a fixed
-25 bytes, and the response headers (`TAI-Nonce`
-echo, `TAI-Signature`, `TAI-Key-Selector`,
-`TAI-Leap-Seconds`) add at most a few hundred
-octets — an attacker cannot induce a response
-meaningfully larger than the request, so Taistamp
-is not usable as an amplification vector.
+The protocol-mandated fields of a signed response
+contribute at most approximately 530 bytes at maximum
+field lengths, excluding transport framing and any
+headers added by intermediaries — the response body
+is a fixed 25 bytes, and the protocol-defined headers
+(`TAI-Nonce` echo, `TAI-Signature`, `TAI-Key-Selector`,
+`TAI-Leap-Seconds`) account for the remainder — an
+attacker cannot induce a response meaningfully larger
+than the request, so Taistamp is not usable as an
+amplification vector.
 
 ## Why DNS-Based Key Discovery
 
@@ -144,8 +146,9 @@ under a new selector and reconfiguring the server, with
 no client coordination required. A client
 that has cached a signed response can continue to verify
 it as long as the TXT record at the old selector remains
-in DNS. DNSSEC [@?RFC4033] can protect the key material
-end-to-end where the operator controls a signed zone.
+in DNS. DNSSEC [@?RFC4033] protects the key material
+end-to-end and is strongly recommended where the
+operator controls a signed zone.
 
 This approach deliberately trades the ecosystem-level
 misbehaviour detection that Roughtime's multi-server
@@ -266,8 +269,9 @@ packet with the first byte replaced by `s` and bytes
 4–19 replaced with the current time in TAI64NA format.
 TAICLOCK is the direct conceptual predecessor of
 Taistamp: both serve TAI64N timestamps on demand.
-Taistamp differs in using HTTP (firewall-friendly, no
-dedicated daemon), adding optional Ed25519 signatures,
+Taistamp differs in using HTTP (deployable over existing
+HTTPS infrastructure, no dedicated daemon), adding
+optional Ed25519 signatures,
 and publishing keys via DNS rather than relying on the
 transport for integrity.
 
@@ -363,7 +367,11 @@ response, with the exception that `TAI-Nonce`,
 be present. Because the signed payload covers the
 response body, a signature cannot be verified
 without it; `HEAD` is therefore useful only as a
-liveness or configuration probe.
+liveness or configuration probe. Note that this
+makes `HEAD` responses non-equivalent to the
+corresponding `GET` response in the sense of
+[@?RFC9110] Section 9.3.2; carrying an unverifiable
+signature on a bodyless response would be misleading.
 
 `OPTIONS` responses MUST NOT carry any `TAI-*` response
 header and MUST NOT be signed.
@@ -447,7 +455,9 @@ as unsigned regardless of whether `TAI-Signature` is present.
 A client MAY send a request header `TAI-Nonce` carrying
 an opaque byte string encoded as a Structured Field
 Binary [@!RFC9651]. If present on a `GET` request, the server
-MUST echo the header verbatim on the response. `TAI-Nonce` is a
+MUST include a `TAI-Nonce` response field whose
+`sf-binary` value encodes the same octet sequence
+as the request field. `TAI-Nonce` is a
 singleton field (Section 5.5 of [@?RFC9110]) and MUST
 NOT appear more than once in a request or response. A
 recipient that encounters more than one instance MUST
@@ -463,20 +473,25 @@ whether `TAI-Signature` is present.
 A server MUST NOT interpret the nonce. If a server
 receives a `TAI-Nonce` that is a malformed sf-binary
 it MUST treat the field as absent and MUST NOT sign
-the response. The `TAI-Nonce` field value MUST be
-at least 14 octets and MUST NOT exceed 174 octets.
-14 octets corresponds to `sf-binary` of ~7 raw bytes
-(: + 12 base64 + =-pad + :); 174 corresponds to ~129
-raw bytes.
+the response. The decoded `sf-binary` value MUST contain at least
+7 octets and MUST NOT exceed 129 octets. When
+serialized as `sf-binary`, these correspond exactly
+to field values of 14 octets (: + 12 base64 +
+padding + :) and 174 octets (: + 172 base64 + :)
+respectively; implementations MAY reject on wire
+length before decoding as an optimisation, but the
+normative check is on decoded length.
 
-The lower bound corresponds to ~7 raw bytes of
-client-supplied entropy, which is sufficient
-unpredictability for the replay defence in this
-section. The upper bound corresponds to ~129 raw
-bytes and caps the nonce's contribution to overall
-response size; combined with the 25-byte body and
-the other response headers, the total response
-stays well under 1 KB. Implementations that require
+The lower bound of 7 decoded octets provides
+sufficient client-supplied entropy for the replay
+defence in this section. The upper bound of 129
+decoded octets caps the nonce's contribution to
+overall response size; combined with the 25-byte body and
+the other protocol-defined response headers, the
+protocol-mandated fields contribute at most
+approximately 530 bytes in total, excluding transport
+framing and intermediary-added headers. Implementations
+that require
 larger nonces for compatibility with a higher-entropy
 convention may negotiate a future extension; this
 version of the protocol holds the bounds fixed for
@@ -492,8 +507,9 @@ bytes encoded as an sf-binary value are sufficient for
 typical use.
 
 A client that included a `TAI-Nonce` in the request
-MUST reject any response that does not echo the nonce
-verbatim and carry a valid `TAI-Signature`; such a
+MUST reject any response whose decoded `TAI-Nonce`
+octets do not match the request nonce, or that does
+not carry a valid `TAI-Signature`; such a
 response MUST be treated as unsigned and, if the
 client requires authentication, discarded. This
 ensures that a network attacker who strips the
@@ -516,9 +532,13 @@ A signed successful response carries two additional headers:
 | `TAI-Signature`     | the Ed25519 signature, as an sf-binary |
 
 The selector MUST match the following ABNF production
-[@!RFC5234] so that it forms a single, DNS-safe label
-conforming to the LDH rule of [@!RFC1035] (Section 2.3.1)
-and is a valid sf-token [@!RFC9651]:
+[@!RFC5234]. The grammar is constrained to the subset
+of DNS LDH labels ([@!RFC1035] Section 2.3.1) that are
+also valid sf-tokens ([@!RFC9651]); the leading-ALPHA
+requirement follows from sf-token, not from DNS alone,
+because sf-token requires its first character to be
+ALPHA or `*` ([@!RFC9651] Section 4.1.7), excluding
+digit-leading labels that DNS would otherwise permit:
 
 ~~~
 selector = ALPHA [ *61( ALPHA / DIGIT / "-" )
@@ -551,17 +571,19 @@ leap-u32be    = 4 octets  ; TAI-Leap-Seconds,
               ;   big-endian unsigned
 selector-len  = 1 octet   ; length of selector-bytes, 1..63
 selector-bytes = 1..63 octets ; the selector, ASCII
-nonce-bytes   = octets    ; the TAI-Nonce header
-              ;   value, verbatim
+nonce-bytes   = octets    ; decoded sf-binary octets
+              ;   of the TAI-Nonce field value
 
 payload = domain-tag label-bytes leap-u32be
           selector-len selector-bytes nonce-bytes
 ~~~
 
-nonce-bytes is the octets of the `TAI-Nonce` HTTP
-field value as transmitted, after standard HTTP
-parser whitespace stripping but before any
-`sf-binary` base64 decoding.
+nonce-bytes is the octet sequence obtained by
+parsing the `TAI-Nonce` field value as an
+`sf-binary` item per [@!RFC9651] and decoding
+the base64 value. The textual representation
+of the field is not part of the signed input;
+only the decoded bytes are signed.
 
 The trailing NUL on `domain-tag` is significant: it
 prevents extension of the tag into adjacent bytes by
@@ -577,10 +599,10 @@ length is computationally infeasible under the
 existential unforgeability of Ed25519.
 
 The nonce occupies the tail of the payload. Its length
-is therefore self-delimiting: a verifier that has
-recovered `domain-tag`, `label-bytes`, `leap-u32be`,
-`selector-len`, and `selector-bytes` reconstructs the
-nonce as the remaining input.
+is therefore self-delimiting: a verifier computes
+`nonce-bytes` from the decoded `TAI-Nonce` sf-binary
+value and appends it as the final payload component,
+with no explicit length field required.
 
 ## When to Sign
 
@@ -720,8 +742,9 @@ This section applies when the response carries both
 reads the response and reconstructs the framed
 payload as defined in (#signing). The verifier MUST:
 
-1. Confirm that the request `TAI-Nonce` matches the
-   response `TAI-Nonce` byte-for-byte.
+1. Confirm that the decoded `sf-binary` octets of
+   the response `TAI-Nonce` match those of the
+   request `TAI-Nonce`.
 2. Confirm that the `TAI-Key-Selector` value
    is a well-formed selector matching the ABNF
    in (#signing).
@@ -764,6 +787,15 @@ the nonce, gains no replay protection. Verifiers
 SHOULD generate a fresh, unpredictable nonce for each
 request.
 
+Replay protection is scoped to the verifier's own
+nonce uniqueness enforcement. The protocol does not
+prevent a recorded request/response pair from being
+presented to a second application that does not track
+nonce lifecycle. Verifiers SHOULD treat each signed
+response as valid for a single use and SHOULD NOT
+accept a response whose nonce was issued by a previous
+request.
+
 ## Domain Separation
 
 The `taistamp-v1%x00` prefix prevents an Ed25519 key
@@ -775,12 +807,21 @@ Taistamp signing key for any other purpose.
 ## DNS Trust
 
 Verification reduces to trusting the DNS lookup of the
-TXT record at `<selector>._taistamp.<host>`. A
-verifier that does not validate DNS responses (for
-instance via DNSSEC or a trusted resolver path) is
-vulnerable to a DNS attacker who can substitute a
-public key. Operators SHOULD publish under a DNSSEC-
-signed zone where feasible.
+TXT record at `<selector>._taistamp.<host>`. A verifier
+that does not validate DNS responses (for instance via
+DNSSEC or a trusted resolver path) is vulnerable to a
+DNS attacker who can substitute a public key and then
+sign responses with the corresponding private key,
+producing a forged time value that verifies
+successfully. Unlike DKIM, where key substitution
+causes verification failures, here it enables complete
+spoofing. Without authenticated DNS, security reduces
+to transport-level DNS trust, not protocol-level key
+authentication.
+
+Operators SHOULD publish under a DNSSEC-signed zone.
+Verifiers SHOULD validate DNSSEC signatures or use a
+resolver path that provides equivalent guarantees.
 
 ## Clock Manipulation
 
@@ -797,9 +838,12 @@ multiple independently operated services.
 The `TAI-Leap-Seconds` header is included in the
 signed payload as `leap-u32be`; the signature attests
 that the server emitted this specific value, but not
-that it is correct. An operator whose leap-second
-table is wrong, or who deliberately sets it wrong,
-will sign whatever count they emit. Clients who
+that it is correct. Signing it allows the verifier to
+reconstruct the server's own UTC interpretation of the
+timestamp, even though the verifier need not trust that
+value for UTC conversion purposes. An operator whose
+leap-second table is wrong, or who deliberately sets it
+wrong, will sign whatever count they emit. Clients who
 require UTC equivalence MUST source the TAI-to-UTC
 offset from a trusted table rather than from the
 server.
@@ -836,6 +880,26 @@ re-fetch limit does not bound. Verifiers MUST apply rate-limiting
 or exponential back-off on all DNS lookups for names under
 `_taistamp.<host>`, regardless of whether the lookup is a first
 fetch or a re-fetch.
+
+## Caching Intermediaries
+
+Note: this section is non-normative.
+
+Successful `GET` responses carry `Cache-Control: no-store`
+(see (#successful-response)), which instructs intermediaries
+not to retain or serve the response from cache. However,
+CDN and proxy configurations sometimes override this
+directive, for instance via path-based cache rules that
+match `/.well-known/` resources. A cached Taistamp response
+silently delivers a frozen time value to all subsequent
+clients without any indication that the reading is stale.
+
+Operators deploying Taistamp behind a CDN or reverse
+proxy SHOULD explicitly configure the intermediary to
+pass `GET` responses to `/.well-known/taistamp` through
+without caching, and SHOULD verify this behaviour
+before relying on signed responses for time-sensitive
+decisions.
 
 # IANA Considerations
 
