@@ -5,7 +5,7 @@ ipr = "trust200902"
 area = "Applications"
 submissiontype = "independent"
 keyword = ["TAI64N", "TAI", "time", "Ed25519", "well-known", "DKIM"]
-date = 2026-10-08T11:15:11Z
+date = 2026-10-08T18:44:48Z
 
 [seriesInfo]
 name = "Internet-Draft"
@@ -35,16 +35,20 @@ organization = "Apptly Software Ltd"
 .# Abstract
 
 This memo defines Taistamp, an HTTP-accessible service
-that returns the current time as a TAI64N label,
+that returns a server's current time as a TAI64N label,
 optionally signed with Ed25519. The service is reached
-at the well-known URI `/.well-known/taistamp` and is
-intended for clients that need an authenticated
-wall-clock reading without running an NTP stack or
-relying on the client's own clock for TLS certificate
-validation. The
-signing scheme uses a length-prefixed, domain-separated
-framing and publishes verification keys as DNS TXT
-records in a DKIM-inspired selector layout.
+at the well-known URI `/.well-known/taistamp` and provides
+authenticated time readings without an NTP stack when
+an authorized verification key is available. Verification
+keys are obtained through authenticated DNS or independently
+provisioned client configuration. A client without a usable
+wall clock needs a key-authentication and transport route
+that does not depend on that clock; configured verification
+keys provide such a key-authentication route. DNSSEC and
+certificate validation retain their time prerequisites.
+The signing scheme uses length-prefixed, domain-separated
+framing and binds the response to a client-supplied nonce.
+DNS-published keys use a DKIM-inspired selector layout.
 
 {mainmatter}
 
@@ -65,10 +69,25 @@ or stamp local events. Two common sources fall short:
 Taistamp addresses these by serving the current time as
 a 25-byte TAI64N [@!TAI64] label over HTTP, with an
 optional Ed25519 [@!RFC8032] signature bound to a
-client-supplied nonce. Verification keys are published
-in DNS as TXT records under a DKIM-style [@?RFC6376]
-selector, so keys can be rotated without
-coordinating with clients.
+client-supplied nonce. Verification keys can be obtained
+through authenticated DNS TXT records under a DKIM-style
+[@?RFC6376] selector, or provisioned independently for a
+service-domain and selector. DNS publication permits key
+rotation without reconfiguring each client. Independently
+configured keys require their own trusted update process.
+
+A nonce removes the need for a wall clock when binding a
+signed response to a request; it does not establish which
+key the client should trust. Local DNSSEC validation needs
+an independently justified time estimate sufficient for
+its signature-validity checks. Certificate-based transport
+authentication has its own validity checks. Clockless
+bootstrap therefore requires a route whose authentication
+prerequisites are already met, such as a configured
+verification key over an explicitly permitted plaintext
+HTTP connection. Without such a route, the client cannot
+obtain an authenticated Level 2 result merely by querying
+Taistamp. See (#clockless-bootstrap-and-key-authentication).
 
 The protocol is deliberately small. A compliant
 implementation fits in a single HTTP request handler, has no
@@ -98,10 +117,12 @@ application layer, independent of the transport: any
 in-transit modification breaks the signature, and a
 client-supplied nonce prevents replay. These guarantees
 apply only to responses bearing a valid `TAI-Signature`
-matching a request `TAI-Nonce`. A network attacker who
-cannot forge the signature can at most drop or delay
-responses, which is a denial of service rather than
-a security breach.
+matching a fresh request `TAI-Nonce`, verified with a key
+already authorized for the service-domain. A network
+attacker unable to sign with an authorized key can still
+drop or delay responses. A nonce does not bound delay;
+clients MUST account for that uncertainty when using the
+reading, as described in (#threat-model).
 
 TLS [@?RFC9846] is RECOMMENDED. It adds transport
 confidentiality (hiding that a client is querying for
@@ -139,16 +160,23 @@ Key rotation therefore requires a client update or a
 coordinated key-distribution mechanism outside the
 protocol.
 
-Taistamp operators instead publish verification keys as DNS TXT
-records under a DKIM-inspired [@?RFC6376] selector
-scheme; they rotate a key by publishing a new TXT record
-under a new selector and reconfiguring the server, with
-no client coordination required. A client
-that has cached a signed response can continue to verify
-it as long as the TXT record at the old selector remains
-in DNS. DNSSEC [@!RFC4033] protects the key material
-end-to-end and is strongly recommended where the
-operator controls a signed zone.
+Taistamp supports DNS TXT publication under a DKIM-inspired
+[@?RFC6376] selector scheme. For clients using DNS-based
+key discovery, operators rotate a key by publishing a new
+TXT record and reconfiguring the server, subject to the
+cache and authentication requirements in (#key-rotation)
+and (#dns-trust). DNSSEC [@!RFC4033] authenticates the
+key binding when its validation prerequisites are met.
+
+This operational benefit does not make DNSSEC independent
+of time. A configured verification key is an alternative
+for clients that cannot yet authenticate DNS key data.
+This uses the same kind of pre-established service-key
+trust as the configured-key model described above; it
+is not automatically refreshed or revoked through DNS.
+The application must arrange trusted provisioning and
+key updates as described in
+(#independently-configured-verification-keys).
 
 This approach deliberately trades the ecosystem-level
 misbehaviour detection that Roughtime's multi-server
@@ -217,20 +245,22 @@ to downgrade.
 
 ## Why Nonce-Based Anti-Replay
 
-An alternative to a client-supplied nonce would be a
-server-enforced freshness window: reject any response
-older than N seconds. This approach is circular: it
-requires the client to have an approximately correct
-clock already, which is precisely the precondition
-Taistamp is designed to avoid.
+A client-side freshness test that rejects a response older
+than a configured interval requires an approximately
+correct wall clock. A fresh, unpredictable client nonce
+avoids that prerequisite for binding a signed response to
+a particular request: the server signs the nonce together
+with the returned label, so an earlier response to a
+different nonce cannot satisfy the new request.
 
-A client-supplied nonce breaks the circularity. The
-client need have no prior knowledge of the time; it
-generates an unpredictable value, sends it in the
-request, and the server's signature binds the returned
-label to that value. A replayed response from an
-earlier exchange will carry a different nonce and the
-signature will not verify.
+This removes a clock dependency from request freshness,
+not from verification-key authentication. The client must
+still establish an authorized service-domain-to-key
+binding by a route whose own prerequisites are met.
+A matching nonce alone does not authenticate the responder
+or its claimed time, and a nonce does not limit how long
+an attacker can delay a response. See
+(#clockless-bootstrap-and-key-authentication).
 
 ## Precision Expectations
 
@@ -302,8 +332,11 @@ distributes trust via a configured list of server
 public keys, and detects misbehaving servers by
 comparing timestamps and accuracy radii across
 multiple providers. Taistamp is simpler and more narrowly
-scoped: a single HTTP endpoint, DNS-based key
-discovery, and no ecosystem coordination requirement.
+scoped: a single HTTP endpoint, a choice of DNS-based
+or independently configured verification keys, and no
+ecosystem coordination requirement. Configured-key
+operation shares the provisioning and rollover trade-off
+of other protocols using pre-established service keys.
 
 # Conventions and Definitions
 
@@ -359,6 +392,12 @@ this procedure; a client MUST NOT use reverse DNS to
 invent one. Access without DNS-based verification
 remains possible. Independently configured verification
 keys for IP-literal URIs are outside this specification.
+
+A "usable wall clock" is an independently justified time
+estimate adequate for the validity checks being performed.
+It is distinct from a monotonic elapsed-time source. A
+candidate Taistamp reading is not an independent time
+estimate for authenticating its own verification key.
 
 HTTP field values defined in this document use
 Structured Field Values [@!RFC9651]. Type annotations
@@ -551,9 +590,12 @@ rejected regardless of signature state. If the response
 carries a `TAI-Nonce` whose decoded octets match the request
 nonce, the trust level depends on the key/signature state as
 defined in (#trust-levels). The key/signature state is
-Unresolvable when `TAI-Key-Selector` is malformed or
-present but does not resolve in DNS.
-These cases are summarised in the following table.
+Unresolvable when no authorized key can be obtained for
+the well-formed selector under the client's preselected
+key-discovery policy; a malformed selector has state
+Malformed. Valid means that the signature verifies with
+an authorized key, not merely a key received from the
+network. These cases are summarised in the following table.
 
 ~~~
 +----------------+---------+--------------+--------------+-------+
@@ -834,11 +876,14 @@ forward these fields intact.
 
 # Key Publication
 
-This section applies only to servers configured
-with a signing key and selector.
+This section describes DNS publication and independent
+configuration of verification keys for services configured
+with a signing key and selector. A service intended for
+DNS-based discovery MUST publish its verification key as
+a DNS TXT record. A configured-key-only deployment need
+not publish that record.
 
-A server publishes its verification key as a DNS
-TXT record. The owner name is
+For DNS publication, the owner name is
 
 ~~~
 <selector> "._taistamp." <host>
@@ -880,10 +925,62 @@ A verifier MUST treat an unknown `v` or `k` as an
 unrecoverable failure for that selector and MUST NOT
 fall back silently.
 
+## Independently Configured Verification Keys
+
+A client MAY use independently configured Ed25519 public
+keys instead of DNS-based key discovery. The configuration
+MUST bind each authorized 32-octet public key to the retained
+service-domain and a well-formed selector. Configured
+selector matching MUST be exact octet matching; the
+selector's original octets remain part of the signed
+payload. Multiple selectors MAY be configured for one
+service-domain, for example to prepare for key rollover.
+This specification defines no configuration-file format.
+
+The application MUST select the key-discovery mode for
+the service-domain before making the request. In configured-key
+mode, the verifier MUST select the key only from that
+configuration and MUST NOT perform DNS key discovery for
+the transaction. Routing lookups for connection establishment
+remain subject to the application's transport policy.
+The received selector identifies an entry in the configured
+set; it does not authorize a new key or a different domain.
+
+The configuration MUST come from an independently trusted
+source. Learning a key from the unauthenticated response
+or its DNS path and then storing it is not independent
+provisioning. The client MUST protect the configuration
+against unauthorized modification and rollback to withdrawn
+keys. The application MUST specify how its authorized key
+set is installed, updated, and revoked; this document does
+not define an on-wire key-update protocol.
+
+An unknown selector, a verification failure, or an expired
+local authorization MUST NOT cause automatic fallback to
+DNS key discovery or acceptance below the application's
+required authentication level. Modes can be changed only
+through an independently authorized application decision,
+not by a response or network failure.
+
+Configured keys have no protocol-defined time validity
+fields. Where a deployment adds time-based authorization
+conditions, it MUST satisfy them independently before
+using the key for clockless bootstrap; it MUST NOT use
+the candidate reading to make its own key eligible.
+
+DNS TTLs and removal of DNS records do not expire or revoke
+configured authorization. A client holding a compromised
+configured key remains exposed until its trusted
+configuration withdraws that key. Automatic rollover for
+DNS clients does not update configured-key clients; a
+provider serving both modes MUST plan both lifecycles.
+
 ## Key Rotation
 
-Key rotation follows a publish-then-switch-then-retire
-sequence.
+DNS-published key rotation follows a publish-switch-retire
+sequence. This sequence does not update
+independently configured keys; see
+(#independently-configured-verification-keys).
 
 Operators SHOULD choose a DNS TTL for the TXT
 record that balances query load against key rotation
@@ -945,9 +1042,9 @@ signature as invalid, subject to the lookup limits in
 
 ### Key Revocation
 
-If a signing key is compromised, the service operator
-MUST withdraw its DNS authorization without a normal
-retirement period. This can remove the key TXT record
+If a DNS-published signing key is compromised, the
+service operator MUST withdraw its DNS authorization
+without a normal retirement period. This can remove the key TXT record
 or remove or replace a selector CNAME that authorizes
 it. The operator MUST account for every remaining key
 publication path that authorizes the compromised key
@@ -1030,24 +1127,27 @@ customer DNS edit for every new key.
 # Trust Levels
 
 A Taistamp response is assigned one of four trust levels,
-combining the nonce echo result and the key/signature state.
+combining the nonce echo result and the authorized
+key/signature state.
 
 **Level 2 — Signed.** The response `TAI-Nonce` matches the
-request nonce and the `TAI-Signature` verifies against the
-public key resolved from `TAI-Key-Selector`. The time value
-is both fresh and authenticated, subject to authentication
-of the service-domain-to-key binding as described in
-(#dns-trust). Mathematical signature verification alone
-does not establish the identity of an unauthenticated key.
+request nonce and the `TAI-Signature` verifies against a
+key authorized for the retained service-domain and selector
+under the policy selected before the request. Authorization
+comes from authenticated DNS or independent configuration,
+as described in (#verification). The reading is authenticated
+and bound to that request. This does not establish clock
+accuracy or bound network delay.
 
 **Level 1 — Unique.** The response `TAI-Nonce` matches the
 request nonce, but the signature is absent, the
-`TAI-Key-Selector` is malformed, or the `TAI-Key-Selector`
-does not resolve in DNS. The time value is fresh but
-unauthenticated. A malformed or unresolvable selector
-indicates a configuration error or that the signing key has
-not yet propagated in DNS; this is a soft degradation, not
-a failure.
+`TAI-Key-Selector` is malformed, or no authorized key can
+be obtained under the selected policy. The nonce echo
+identifies the exchange, but does not authenticate the
+responder or its claimed time. This includes inability
+to authenticate DNS key data because its validation-time
+prerequisites are not met. A mathematically valid signature
+under an unauthenticated key does not raise this level.
 
 **Level 0 — Plain.** The response carries no echoed
 `TAI-Nonce`. The time value carries no freshness or
@@ -1055,50 +1155,58 @@ authentication guarantee from this protocol.
 
 **Level -1 — Inconsistent.** Either the response
 `TAI-Nonce` is present but does not match the request
-nonce, or the `TAI-Key-Selector` resolves but the
-`TAI-Signature` does not verify. The response MUST be
-rejected.
+nonce, or a key is authorized under the selected policy
+but the `TAI-Signature` does not verify. The response
+MUST be rejected.
 
 A client MUST NOT use a response at trust level -1.
-Whether a client accepts level 0 or level 1 when a higher
-level is expected is an application policy decision outside
-the scope of this document.
+Whether a client accepts level 0 or level 1 for a purpose
+not requiring authentication is an application policy
+choice. It MUST NOT accept such a result when Level 2
+is required. Clockless authenticated bootstrap requires
+Level 2, not merely a matching nonce.
 
 # Verification
 
 This section applies when the response carries both
-`TAI-Key-Selector` and `TAI-Signature`. A verifier
-reads the response and reconstructs the framed
-payload as defined in (#signing). Its verification
-context MUST retain the service-domain from the
-application-selected service URI, independently of
-any endpoint delegation. The verifier MUST:
+`TAI-Key-Selector` and `TAI-Signature`. Before making the
+request, the client MUST retain the application-selected
+service-domain and select its key-discovery policy.
+Endpoint discovery MUST NOT change either. A verifier
+reconstructs the framed payload as defined in (#signing).
+The verifier MUST:
 
-1. Confirm that the decoded `sf-binary` octets of
-   the response `TAI-Nonce` match those of the
-   request `TAI-Nonce`.
-2. Confirm that the `TAI-Key-Selector` value
-   is a well-formed selector matching the ABNF
-   in (#signing).
-3. Resolve the TXT record at
-   `<selector>._taistamp.<host>`, with `<host>` set to
-   the retained service-domain, and parse the `v`, `k`,
-   and `p` tags. Follow key aliases as specified in
-   (#delegated-key-publication), subject to the
-   authentication policy in (#dns-trust).
-4. Verify the Ed25519 signature using the public key
-   from `p` over the framed payload.
+1. Confirm that the decoded `sf-binary` octets of the
+   response `TAI-Nonce` match those of the request
+   `TAI-Nonce`.
+2. Confirm that the `TAI-Key-Selector` value is a
+   well-formed selector matching the ABNF in (#signing).
+3. Obtain a key authorized for the retained service-domain
+   and selector under the preselected policy. In configured-key
+   mode, use only the independently configured entry
+   described in (#independently-configured-verification-keys),
+   without a DNS key lookup. In DNS mode, resolve
+   `<selector>._taistamp.<host>`, using the service-domain
+   for `<host>`, parse the `v`, `k`, and `p` tags, and
+   authenticate the complete key binding under (#dns-trust).
+   Follow aliases under (#delegated-key-publication).
+   Apply all validation-time requirements described in
+   (#clockless-bootstrap-and-key-authentication); the
+   candidate reading MUST NOT authenticate its own key.
+4. Verify the Ed25519 signature over the framed payload
+   using the authorized key selected in step 3.
 
-Each step produces a trust level outcome. If step 1 fails
-(nonce mismatch), the response is Inconsistent (level -1)
-and MUST be rejected. If step 2 fails (malformed selector)
-or step 3 yields no DNS record (unresolvable selector),
-signature verification stops and the response is Unique
-(level 1). If step 4 fails (signature does not verify),
-the response is Inconsistent (level -1) and MUST be
-rejected. If all four steps succeed, the response is
-Signed (level 2). Trust levels are defined in
-(#trust-levels).
+A nonce mismatch in step 1 produces Inconsistent (level -1)
+and MUST be rejected. A malformed selector in step 2, or
+inability to obtain an authorized key in step 3, leaves a
+nonce-matching response at Unique (level 1), subject to the
+application's acceptance policy. A signature failure in
+step 4 produces Inconsistent (level -1) and MUST be rejected.
+Only successful completion of all four steps produces
+Signed (level 2). A client requiring authenticated time
+MUST fail the transaction when an authorized key cannot
+be obtained; it MUST NOT use a Level 1 reading to satisfy
+its authentication prerequisite.
 
 Verifiers MUST use the strict verification procedure
 described in Section 5.1.7 of [@!RFC8032].
@@ -1107,10 +1215,10 @@ described in Section 5.1.7 of [@!RFC8032].
 
 ## Threat Model
 
-Taistamp authenticates a single time reading at the
-moment a client asks. It does not establish a long-
-running synchronised clock and does not bound network
-delay; a client is responsible for treating the
+A Signed (level 2) Taistamp response authenticates a
+single reading made in response to the client's request.
+It does not establish a long-running synchronised clock
+and does not bound network delay; a client is responsible for treating the
 returned label as a measurement subject to the
 round-trip time of its request. The trust level
 framework (see (#trust-levels)) expresses the combined
@@ -1138,6 +1246,12 @@ or Signed (level 2) response as valid for a single use
 and SHOULD NOT accept a response whose nonce was issued
 by a previous request.
 
+At Level 1, the nonce echo is not authenticated. An
+on-path attacker can observe the new nonce and attach
+it to an arbitrary time value. Nonce matching alone
+therefore MUST NOT be treated as authenticated freshness
+or used to bootstrap key authentication.
+
 ## Domain Separation
 
 The `taistamp-v1%x00` prefix prevents an Ed25519 key
@@ -1148,9 +1262,12 @@ Taistamp signing key for any other purpose.
 
 ## DNS Trust
 
-A Signed (level 2) response depends on an authenticated
-binding from `<selector>._taistamp.<host>` to the accepted
-public key. An attacker able to replace unauthenticated
+For DNS-based key discovery, a Signed (level 2) result
+depends on an authenticated binding from
+`<selector>._taistamp.<host>` to the accepted public key.
+Independently configured keys use the separate authorization
+route in (#independently-configured-verification-keys).
+An attacker able to replace unauthenticated
 key-discovery data can substitute a public key and sign
 an arbitrary time value with its corresponding private
 key. A mathematically valid signature then does not
@@ -1159,11 +1276,12 @@ trusted key binding, an apparent Signed result has no
 stronger service-identity guarantee than Unique (level 1).
 
 Operators SHOULD publish key data under DNSSEC-signed
-zones [@!RFC4033]. When an application requires an
-authenticated service identity, its verifier MUST use
-DNSSEC-authenticated resolution or an explicitly
-configured mechanism providing equivalent key-binding
-guarantees. An encrypted connection to a resolver alone
+zones [@!RFC4033]. When using DNS to authorize a key,
+a verifier MUST use DNSSEC-authenticated resolution or
+an explicitly configured mechanism providing equivalent
+key-binding guarantees, subject to the prerequisites in
+(#clockless-bootstrap-and-key-authentication). An encrypted
+connection to a resolver alone
 does not authenticate unsigned authoritative DNS data.
 A trusted validating resolver and a protected path to
 its validation results can provide the required service.
@@ -1182,6 +1300,98 @@ authenticated Level 2 result MUST NOT be replaced by a
 weaker accepted result after discovery or key-resolution
 failure. Applications that permit lower levels retain
 the policy choice described in (#trust-levels).
+
+## Clockless Bootstrap and Key Authentication
+
+Request freshness and key authentication have different
+prerequisites. A fresh unpredictable nonce allows a
+response to be bound to its request without a wall clock.
+It does not supply the time needed to authenticate a
+DNSSEC key binding or an X.509 certificate path.
+
+Local DNSSEC validation requires a usable time estimate
+for the RRSIG Inception and Expiration checks in Section
+5.3.1 of [@!RFC4035]. Merely possessing a DNSSEC trust
+anchor does not establish that an old signed key binding
+is still authorized. Certificate-path validation similarly
+checks validity at the validation time (Section 6.1.3 of
+[@!RFC5280]). An arbitrary initial clock value or the
+candidate Taistamp reading is not independent evidence
+that these prerequisites are met.
+
+A trusted validating resolver can use its own usable clock,
+so the stub client need not perform those time checks
+itself. However, the client MUST independently authenticate
+its path to that resolver and trust its validation results.
+Ordinary certificate-based channel authentication may
+reintroduce a client-clock dependency. A securely configured
+path whose authentication does not use the client's wall
+clock can avoid that dependency. Encryption alone, or
+an AD bit received through an unauthenticated path, is
+insufficient. See Section 4.9.3 of [@!RFC4035].
+
+A client with no usable wall clock MAY obtain Level 2 using
+an independently configured verification key whose local
+authorization is already established. Alternatively it MAY
+use a trusted validation service through a clock-independent
+authenticated path. Such clients MUST establish all key
+and transport prerequisites before accepting the reading.
+This document specifies configured service keys as one
+route; it defines no new resolver authentication protocol.
+Without an applicable route, a nonce-matching result is at
+most Level 1, and authenticated bootstrap MUST fail.
+
+The returned time MUST NOT be used as the sole basis for
+accepting the validity periods of the DNSSEC chain or
+certificate path needed to authorize that same reading.
+Deferring those checks and testing them only against the
+returned time demonstrates consistency, not current
+key authorization. For example, an attacker with a retired
+Taistamp private key and a recorded DNSSEC authentication
+chain can sign the new request nonce with a claimed time
+inside the common validity interval of that historical
+chain. If its trust anchor is still accepted, deferred
+checks can all pass even though the key is no longer
+authorized. This is an authorization-replay attack, not
+replay of an earlier nonce-bound Taistamp response.
+This specification does not admit that procedure as an
+independent basis for Level 2.
+
+Configured service keys avoid this particular DNS dependency
+but do not eliminate key compromise or revocation risks.
+Authorization remains only as current as the client's
+trusted configuration. A nonce cannot protect a client
+that still authorizes a compromised key. See
+(#independently-configured-verification-keys).
+
+Configured Taistamp keys authenticate application responses,
+not HTTPS certificates. Clockless operation MUST NOT bypass
+an applicable HTTPS upgrade or certificate check. Direct
+HTTP is usable only where explicitly permitted by the
+application's transport policy; address discovery must
+also be possible under that policy. Otherwise a separate
+clock-independent transport arrangement or usable time
+estimate is required.
+
+A client using Taistamp to establish time MUST generate
+fresh unpredictable nonces even immediately after reboot.
+It MUST NOT rely on wall-clock values alone for nonce
+uniqueness or unpredictability. A monotonic timer can measure
+elapsed request time without knowing the calendar time,
+but this protocol supplies no bound on network delay.
+Applications requiring a bound SHOULD reject exchanges
+whose measured elapsed time exceeds their configured
+limit. A signature still attests only to the server's
+claim, not the correctness of the server's clock.
+
+An independently authenticated TAI reading may subsequently
+be used as input to DNSSEC or certificate validity checks.
+Clients doing so MUST account for measurement and delay
+uncertainty and satisfy the trusted TAI-to-UTC conversion
+requirements in (#leap-second-reporting). The server's
+claimed leap-second count alone does not establish that
+conversion. Obtaining time does not waive any remaining
+validation or application-policy checks.
 
 ## Clock Manipulation
 
@@ -1229,14 +1439,16 @@ Operators SHOULD coordinate TTLs and signature-validity
 periods for relevant key, alias, and delegation data.
 DNS-only revocation is not instantaneous, and removing
 an endpoint binding does not revoke a signing key.
+These DNS lifetimes do not govern independently configured
+keys, whose authorization must be withdrawn through the
+client's trusted configuration process.
 
 ## Selector-Based DNS Amplification
 
-A verifier that performs one DNS lookup per incoming response
-carrying a selector that is malformed or does not resolve
-(Unresolvable key/signature state, yielding Unique (level 1)
-per (#trust-levels)) amplifies
-query load onto the authoritative server publishing the
+In DNS mode, a verifier that performs one lookup per
+incoming response carrying a selector that is malformed
+or does not resolve amplifies query load onto the
+authoritative server publishing the
 `_taistamp.<host>` TXT records. Two cases arise: a cached key
 that fails verification triggers a re-fetch per
 (#verifier-key-caching); a previously unseen selector triggers
@@ -1274,9 +1486,10 @@ time-sensitive decisions.
 Endpoint routing and signing-key authorization are
 separate operations. A hostname CNAME or HTTPS service
 binding changes connection establishment, not the
-verification-key namespace. Only a key binding
-established under (#key-publication) and (#dns-trust)
-authorizes a key for the selected service-domain.
+verification-key namespace. Only an authorized key binding
+established through the
+preselected DNS or configured-key mode authorizes a key
+for the selected service-domain; see (#verification).
 
 Clients MUST apply their configured destination-address
 and port restrictions to discovered endpoints, including
@@ -1295,12 +1508,10 @@ including the request nonce, match. Delegation does not
 create cryptographic isolation between such domains.
 This specification does not change the signed framing.
 
-Delegation also does not bootstrap the time needed to
-validate DNSSEC signatures or TLS certificates. DNSSEC
-validation includes signature inception and expiration
-checks [@!RFC4035]. A client without usable time needs
-an independently justified bootstrap or trust arrangement;
-this document defines no exception to these checks.
+Delegation does not remove the general authentication
+prerequisites in (#clockless-bootstrap-and-key-authentication).
+Those prerequisites apply to direct and delegated endpoints
+alike; this document defines no exception to them.
 
 # IANA Considerations
 
