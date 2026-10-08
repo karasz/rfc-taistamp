@@ -1,4 +1,4 @@
-DRAFT   := draft-mery-nagy-taistamp-00
+DRAFT   := draft-mery-nagy-taistamp-01
 SRC     := taistamp.mmark
 XML     := $(DRAFT).xml
 TXT     := $(DRAFT).txt
