@@ -999,7 +999,7 @@ the "Well-Known URIs" registry [@!RFC8615]:
 | URI Suffix | `taistamp` |
 | Change Controller | Apptly Software Ltd |
 | Reference | This document |
-| Status | permanent |
+| Status | provisional |
 | Related Information | none |
 
 ## Media Type
@@ -1029,12 +1029,12 @@ IANA is requested to register the following entries in
 the "Hypertext Transfer Protocol (HTTP) Field Name
 Registry" [@?RFC9110]:
 
-| Field Name        | Status    | Structured Type | Reference     |
-|-------------------|-----------|-----------------|---------------|
-| `TAI-Leap-Seconds`| permanent | Integer         | this document |
-| `TAI-Nonce`       | permanent | Binary          | this document |
-| `TAI-Key-Selector`| permanent | Token           | this document |
-| `TAI-Signature`   | permanent | Binary          | this document |
+| Field Name        | Status      | Structured Type | Reference     |
+|-------------------|-------------|-----------------|---------------|
+| `TAI-Leap-Seconds`| provisional | Integer         | this document |
+| `TAI-Nonce`       | provisional | Binary          | this document |
+| `TAI-Key-Selector`| provisional | Token           | this document |
+| `TAI-Signature`   | provisional | Binary          | this document |
 
 {backmatter}
 
