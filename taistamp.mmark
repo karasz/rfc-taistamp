@@ -32,6 +32,8 @@ organization = "Apptly Software Ltd"
   uri = "https://apptly.co"
 %%%
 
+<!-- cspell:words IERS libtai taia -->
+
 .# Abstract
 
 This memo defines Taistamp, an HTTP-accessible service
@@ -415,12 +417,25 @@ external representation of the server's current time,
 formatted per [@!TAI64]:
 
 ~~~
-'@' hex16(seconds-since-TAI-epoch) hex8(nanoseconds)
+'@' hex16(2^62 + T) hex8(nanoseconds)
 ~~~
 
-where `hex16` and `hex8` denote 16 and 8 lowercase
-hexadecimal digits respectively. The leading `@` is
-literal.
+where `T` counts the TAI seconds since the beginning of
+1970 TAI, and `hex16` and `hex8` denote 16 and 8
+lowercase hexadecimal digits respectively. The leading
+`@` is literal.
+
+For an instant from 1972 onwards outside an inserted
+leap second, `T` is POSIX time plus TAI - UTC. An
+inserted second, 23:59:60 UTC, has a label of its own,
+one greater than that of 23:59:59.
+
+The `tai_now()` and `taia_now()` functions of libtai
+[@?LIBTAI] assume a system clock counting TAI seconds
+since 1970-01-01 00:00:10 TAI. On a host whose clock
+counts POSIX time, the labels they return are behind
+TAI by TAI - UTC - 10 seconds: 27 seconds since
+2017-01-01.
 
 The following headers MUST be present:
 
@@ -431,8 +446,8 @@ The following headers MUST be present:
 | `Cache-Control`  | `no-store`                           |
 | `TAI-Leap-Seconds` | sf-integer, e.g. `37`              |
 
-`TAI-Leap-Seconds` carries the offset, in seconds,
-between TAI and UTC at the moment of the response,
+`TAI-Leap-Seconds` carries TAI - UTC, in seconds, for
+the instant the label denotes (see below),
 as a Structured Field Integer [@!RFC9651]. leap-seconds
 emitted MUST be a non-negative integer in [0, 2^32−1];
 sf-integer supports values up to ±10^15 but values outside
@@ -449,6 +464,31 @@ as absent per Section 4.2 of [@!RFC9651];
 the recipient then has no server-supplied TAI-to-UTC
 offset for this response and MUST treat the response
 as unsigned regardless of whether `TAI-Signature` is present.
+
+The `TAI-Leap-Seconds` value is TAI - UTC as announced
+by the IERS for the UTC second that contains the instant
+the label denotes. A new value takes effect at 00:00:00
+UTC on the date given in the IERS `leap-seconds.list`
+file, as distributed by IANA [@?LEAP-SECONDS]; an
+inserted second, 23:59:60, is the last second of its day
+and carries the preceding value. For a label with TAI
+seconds T, the value is that of the latest entry in
+the file whose offset D and date E, as POSIX time,
+satisfy E + D <= T.
+
+The following responses illustrate these rules around
+the leap second inserted at the end of 2016:
+
+~~~
+UTC                   POSIX       TAI-UTC  body
+2016-12-31T23:59:59Z  1483228799  36       @40000000586846a300000000
+2016-12-31T23:59:60Z  (none)      36       @40000000586846a400000000
+2017-01-01T00:00:00Z  1483228800  37       @40000000586846a500000000
+~~~
+
+At 2017-01-01T00:00:00Z, libtai's `tai_now()` on a
+POSIX clock returns the label `400000005868468a`, 27
+seconds behind TAI.
 
 ## Nonce Echo
 
@@ -1057,6 +1097,22 @@ Registry" [@?RFC9110]:
     <title>TAI64, TAI64N, and TAI64NA</title>
     <author initials="D. J." surname="Bernstein" fullname="Daniel J. Bernstein"/>
     <date year="1997"/>
+  </front>
+</reference>
+
+<reference anchor="LIBTAI" target="https://cr.yp.to/libtai.html">
+  <front>
+    <title>libtai</title>
+    <author initials="D. J." surname="Bernstein" fullname="Daniel J. Bernstein"/>
+  </front>
+</reference>
+
+<reference anchor="LEAP-SECONDS" target="https://data.iana.org/time-zones/tzdb/leap-seconds.list">
+  <front>
+    <title>leap-seconds.list</title>
+    <author>
+      <organization>IANA Time Zone Database</organization>
+    </author>
   </front>
 </reference>
 
