@@ -1010,18 +1010,28 @@ per [@?RFC6838]:
 
 - Type name: `application`
 - Subtype name: `tai64n`
-- Required parameters: none
-- Optional parameters: none
-- Encoding considerations: 7-bit (ASCII)
+- Required parameters: N/A
+- Optional parameters: N/A
+- Encoding considerations: 7bit
 - Security considerations: see (#security-considerations)
-- Interoperability considerations: none
+- Interoperability considerations: N/A
 - Published specification: this document
-- Applications that use this media type: time-
-  authentication clients
-- Fragment identifier considerations: none
-- Restrictions on usage: none
-- Provisional registration: no
-- Author/Change controller: Apptly Software Ltd
+- Applications that use this media type: applications
+  exchanging TAI64N timestamps, such as Taistamp clients
+  and servers
+- Fragment identifier considerations: N/A
+- Additional information:
+  - Deprecated alias names for this type: N/A
+  - Magic number(s): N/A
+  - File extension(s): N/A
+  - Macintosh file type code(s): N/A
+- Person & email address to contact for further
+  information: see the Authors' Addresses section
+- Intended usage: COMMON
+- Restrictions on usage: N/A
+- Author: see the Authors' Addresses section
+- Change controller: Apptly Software Ltd
+- Provisional registration? (standards tree only): no
 
 ## Header Fields
 
