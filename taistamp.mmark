@@ -1013,10 +1013,14 @@ per [@?RFC6838]:
 - Required parameters: N/A
 - Optional parameters: N/A
 - Encoding considerations: 7bit
-- Security considerations: see (#security-considerations)
+- Security considerations: the content is a fixed-length
+  timestamp with no active content and no compression. It
+  has no integrity or authenticity protection of its own;
+  (#security-considerations) describes how Taistamp
+  provides it.
 - Interoperability considerations: N/A
 - Published specification: this document
-- Applications that use this media type: applications
+- Applications that use this media type: any application
   exchanging TAI64N timestamps, such as Taistamp clients
   and servers
 - Fragment identifier considerations: N/A
