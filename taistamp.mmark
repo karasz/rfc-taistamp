@@ -597,7 +597,8 @@ The signed payload is the concatenation, in order, of
 the following fields:
 
 ~~~
-domain-tag    = "taistamp-v1" %x00
+domain-tag    = 12 octets ; "taistamp-v1" in lower-case
+              ;   ASCII, then 0x00
 label-bytes   = 25 octets ; the response body
 leap-u32be    = 4 octets  ; TAI-Leap-Seconds,
               ;   big-endian unsigned
@@ -871,11 +872,12 @@ by a previous request.
 
 ## Domain Separation
 
-The `taistamp-v1%x00` prefix prevents an Ed25519 key
-configured for Taistamp from being induced to sign a
-message valid under another protocol that happens to
-embed the same suffix. Operators MUST NOT reuse a
-Taistamp signing key for any other purpose.
+The `taistamp-v1` prefix and its trailing NUL octet
+prevent an Ed25519 key configured for Taistamp from
+being induced to sign a message valid under another
+protocol that happens to embed the same suffix.
+Operators MUST NOT reuse a Taistamp signing key for
+any other purpose.
 
 ## DNS Trust
 
