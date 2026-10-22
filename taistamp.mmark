@@ -832,8 +832,9 @@ rejected. If all four steps succeed, the response is
 Signed (level 2). Trust levels are defined in
 (#trust-levels).
 
-Verifiers MUST use the strict verification procedure
-described in Section 5.1.7 of [@!RFC8032].
+Verifiers MUST verify the signature as described in
+Section 5.1.7 of [@!RFC8032]; in particular, a
+signature whose S is not less than L is invalid.
 
 # Security Considerations
 
