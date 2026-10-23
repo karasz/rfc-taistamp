@@ -32,6 +32,8 @@ organization = "Apptly Software Ltd"
   uri = "https://apptly.co"
 %%%
 
+<!-- cspell:words IERS libtai taia -->
+
 .# Abstract
 
 This memo defines Taistamp, an HTTP-accessible service
@@ -415,12 +417,25 @@ external representation of the server's current time,
 formatted per [@!TAI64]:
 
 ~~~
-'@' hex16(seconds-since-TAI-epoch) hex8(nanoseconds)
+'@' hex16(2^62 + T) hex8(nanoseconds)
 ~~~
 
-where `hex16` and `hex8` denote 16 and 8 lowercase
-hexadecimal digits respectively. The leading `@` is
-literal.
+where `T` counts the TAI seconds since the beginning of
+1970 TAI, and `hex16` and `hex8` denote 16 and 8
+lowercase hexadecimal digits respectively. The leading
+`@` is literal.
+
+For an instant from 1972 onwards outside an inserted
+leap second, `T` is POSIX time plus TAI - UTC. An
+inserted second, 23:59:60 UTC, has a label of its own,
+one greater than that of 23:59:59.
+
+The `tai_now()` and `taia_now()` functions of libtai
+[@?LIBTAI] assume a system clock counting TAI seconds
+since 1970-01-01 00:00:10 TAI. On a host whose clock
+counts POSIX time, the labels they return are behind
+TAI by TAI - UTC - 10 seconds: 27 seconds since
+2017-01-01.
 
 The following headers MUST be present:
 
@@ -431,8 +446,8 @@ The following headers MUST be present:
 | `Cache-Control`  | `no-store`                           |
 | `TAI-Leap-Seconds` | sf-integer, e.g. `37`              |
 
-`TAI-Leap-Seconds` carries the offset, in seconds,
-between TAI and UTC at the moment of the response,
+`TAI-Leap-Seconds` carries TAI - UTC, in seconds, for
+the instant the label denotes (see below),
 as a Structured Field Integer [@!RFC9651]. leap-seconds
 emitted MUST be a non-negative integer in [0, 2^32−1];
 sf-integer supports values up to ±10^15 but values outside
@@ -449,6 +464,31 @@ as absent per Section 4.2 of [@!RFC9651];
 the recipient then has no server-supplied TAI-to-UTC
 offset for this response and MUST treat the response
 as unsigned regardless of whether `TAI-Signature` is present.
+
+The `TAI-Leap-Seconds` value is TAI - UTC as announced
+by the IERS for the UTC second that contains the instant
+the label denotes. A new value takes effect at 00:00:00
+UTC on the date given in the IERS `leap-seconds.list`
+file, as distributed by IANA [@?LEAP-SECONDS]; an
+inserted second, 23:59:60, is the last second of its day
+and carries the preceding value. For a label with TAI
+seconds T, the value is that of the latest entry in
+the file whose offset D and date E, as POSIX time,
+satisfy E + D <= T.
+
+The following responses illustrate these rules around
+the leap second inserted at the end of 2016:
+
+~~~
+UTC                   POSIX       TAI-UTC  body
+2016-12-31T23:59:59Z  1483228799  36       @40000000586846a300000000
+2016-12-31T23:59:60Z  (none)      36       @40000000586846a400000000
+2017-01-01T00:00:00Z  1483228800  37       @40000000586846a500000000
+~~~
+
+At 2017-01-01T00:00:00Z, libtai's `tai_now()` on a
+POSIX clock returns the label `400000005868468a`, 27
+seconds behind TAI.
 
 ## Nonce Echo
 
@@ -473,14 +513,15 @@ whether `TAI-Signature` is present.
 A server MUST NOT interpret the nonce. If a server
 receives a `TAI-Nonce` that is a malformed sf-binary
 it MUST treat the field as absent and MUST NOT sign
-the response. The decoded `sf-binary` value MUST contain at least
-7 octets and MUST NOT exceed 129 octets. When
-serialized as `sf-binary`, these correspond exactly
-to field values of 14 octets (: + 12 base64 +
-padding + :) and 174 octets (: + 172 base64 + :)
-respectively; implementations MAY reject on wire
-length before decoding as an optimisation, but the
-normative check is on decoded length.
+the response. The decoded `sf-binary` value MUST
+contain at least 7 octets and MUST NOT exceed 129
+octets. Serialised with the padding that [@!RFC9651]
+requires, these bounds correspond to field values of
+14 octets (`:`, 12 base64 characters, `:`) and 174
+octets (`:`, 172 base64 characters, `:`);
+implementations MAY reject on wire length before
+decoding as an optimisation, but the normative check
+is on decoded length.
 
 The lower bound of 7 decoded octets provides
 sufficient client-supplied entropy for the replay
@@ -597,7 +638,8 @@ The signed payload is the concatenation, in order, of
 the following fields:
 
 ~~~
-domain-tag    = "taistamp-v1" %x00
+domain-tag    = 12 octets ; "taistamp-v1" in lower-case
+              ;   ASCII, then 0x00
 label-bytes   = 25 octets ; the response body
 leap-u32be    = 4 octets  ; TAI-Leap-Seconds,
               ;   big-endian unsigned
@@ -831,8 +873,9 @@ rejected. If all four steps succeed, the response is
 Signed (level 2). Trust levels are defined in
 (#trust-levels).
 
-Verifiers MUST use the strict verification procedure
-described in Section 5.1.7 of [@!RFC8032].
+Verifiers MUST verify the signature as described in
+Section 5.1.7 of [@!RFC8032]; in particular, a
+signature whose S is not less than L is invalid.
 
 # Security Considerations
 
@@ -871,11 +914,12 @@ by a previous request.
 
 ## Domain Separation
 
-The `taistamp-v1%x00` prefix prevents an Ed25519 key
-configured for Taistamp from being induced to sign a
-message valid under another protocol that happens to
-embed the same suffix. Operators MUST NOT reuse a
-Taistamp signing key for any other purpose.
+The `taistamp-v1` prefix and its trailing NUL octet
+prevent an Ed25519 key configured for Taistamp from
+being induced to sign a message valid under another
+protocol that happens to embed the same suffix.
+Operators MUST NOT reuse a Taistamp signing key for
+any other purpose.
 
 ## DNS Trust
 
@@ -996,7 +1040,7 @@ the "Well-Known URIs" registry [@!RFC8615]:
 | URI Suffix | `taistamp` |
 | Change Controller | Apptly Software Ltd |
 | Reference | This document |
-| Status | permanent |
+| Status | provisional |
 | Related Information | none |
 
 ## Media Type
@@ -1007,18 +1051,32 @@ per [@?RFC6838]:
 
 - Type name: `application`
 - Subtype name: `tai64n`
-- Required parameters: none
-- Optional parameters: none
-- Encoding considerations: 7-bit (ASCII)
-- Security considerations: see (#security-considerations)
-- Interoperability considerations: none
+- Required parameters: N/A
+- Optional parameters: N/A
+- Encoding considerations: 7bit
+- Security considerations: the content is a fixed-length
+  timestamp with no active content and no compression. It
+  has no integrity or authenticity protection of its own;
+  (#security-considerations) describes how Taistamp
+  provides it.
+- Interoperability considerations: N/A
 - Published specification: this document
-- Applications that use this media type: time-
-  authentication clients
-- Fragment identifier considerations: none
-- Restrictions on usage: none
-- Provisional registration: no
-- Author/Change controller: Apptly Software Ltd
+- Applications that use this media type: any application
+  exchanging TAI64N timestamps, such as Taistamp clients
+  and servers
+- Fragment identifier considerations: N/A
+- Additional information:
+  - Deprecated alias names for this type: N/A
+  - Magic number(s): N/A
+  - File extension(s): N/A
+  - Macintosh file type code(s): N/A
+- Person & email address to contact for further
+  information: see the Authors' Addresses section
+- Intended usage: COMMON
+- Restrictions on usage: N/A
+- Author: see the Authors' Addresses section
+- Change controller: Apptly Software Ltd
+- Provisional registration? (standards tree only): no
 
 ## Header Fields
 
@@ -1026,12 +1084,12 @@ IANA is requested to register the following entries in
 the "Hypertext Transfer Protocol (HTTP) Field Name
 Registry" [@?RFC9110]:
 
-| Field Name        | Status    | Structured Type | Reference     |
-|-------------------|-----------|-----------------|---------------|
-| `TAI-Leap-Seconds`| permanent | Integer         | this document |
-| `TAI-Nonce`       | permanent | Binary          | this document |
-| `TAI-Key-Selector`| permanent | Token           | this document |
-| `TAI-Signature`   | permanent | Binary          | this document |
+| Field Name        | Status      | Structured Type | Reference     |
+|-------------------|-------------|-----------------|---------------|
+| `TAI-Leap-Seconds`| provisional | Integer         | this document |
+| `TAI-Nonce`       | provisional | Binary          | this document |
+| `TAI-Key-Selector`| provisional | Token           | this document |
+| `TAI-Signature`   | provisional | Binary          | this document |
 
 {backmatter}
 
@@ -1040,6 +1098,22 @@ Registry" [@?RFC9110]:
     <title>TAI64, TAI64N, and TAI64NA</title>
     <author initials="D. J." surname="Bernstein" fullname="Daniel J. Bernstein"/>
     <date year="1997"/>
+  </front>
+</reference>
+
+<reference anchor="LIBTAI" target="https://cr.yp.to/libtai.html">
+  <front>
+    <title>libtai</title>
+    <author initials="D. J." surname="Bernstein" fullname="Daniel J. Bernstein"/>
+  </front>
+</reference>
+
+<reference anchor="LEAP-SECONDS" target="https://data.iana.org/time-zones/tzdb/leap-seconds.list">
+  <front>
+    <title>leap-seconds.list</title>
+    <author>
+      <organization>IANA Time Zone Database</organization>
+    </author>
   </front>
 </reference>
 
