@@ -848,7 +848,8 @@ the scope of this document.
 This section applies when the response carries both
 `TAI-Key-Selector` and `TAI-Signature`. A verifier
 reads the response and reconstructs the framed
-payload as defined in (#signing). The verifier MUST:
+payload as defined in (#framed-payload). The
+verifier MUST:
 
 1. Confirm that the decoded `sf-binary` octets of
    the response `TAI-Nonce` match those of the
