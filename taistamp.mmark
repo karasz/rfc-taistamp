@@ -357,8 +357,8 @@ support MAY accept `OPTIONS`. A server MUST respond
 `405 Method Not Allowed` to any method it does not
 accept. The `Allow` header on a 405 response, and
 on a successful `OPTIONS` response, MUST enumerate
-the methods the server accepts ([@?RFC9110],
-Section 10.2.1): a server that accepts `OPTIONS`
+the methods the server accepts (Section 10.2.1 of
+[@!RFC9110]): a server that accepts `OPTIONS`
 emits `Allow: GET, HEAD, OPTIONS`; one that does
 not emits `Allow: GET, HEAD`.
 
@@ -372,7 +372,7 @@ without it; `HEAD` is therefore useful only as a
 liveness or configuration probe. Note that this
 makes `HEAD` responses non-equivalent to the
 corresponding `GET` response in the sense of
-[@?RFC9110] Section 9.3.2; carrying an unverifiable
+Section 9.3.2 of [@!RFC9110]; carrying an unverifiable
 signature on a bodyless response would be misleading.
 
 `OPTIONS` responses MUST NOT carry any `TAI-*` response
@@ -457,7 +457,7 @@ MUST treat the response as unsigned.
 Its value is included in the signed payload as `leap-u32be`
 (see (#framed-payload)). A server MUST emit it on
 every successful response. It is a singleton field
-(Section 5.5 of [@?RFC9110]) and MUST NOT appear
+(Section 5.5 of [@!RFC9110]) and MUST NOT appear
 more than once in a response. A recipient that
 encounters more than one instance MUST treat the field
 as absent per Section 4.2 of [@!RFC9651];
@@ -498,7 +498,7 @@ Binary [@!RFC9651]. If present on a `GET` request, the server
 MUST include a `TAI-Nonce` response field whose
 `sf-binary` value encodes the same octet sequence
 as the request field. `TAI-Nonce` is a
-singleton field (Section 5.5 of [@?RFC9110]) and MUST
+singleton field (Section 5.5 of [@!RFC9110]) and MUST
 NOT appear more than once in a request or response. A
 recipient that encounters more than one instance MUST
 treat the field as absent per Section 4.2 of
@@ -614,14 +614,14 @@ selector = ALPHA [ *61( ALPHA / DIGIT / "-" )
 ~~~
 
 `TAI-Key-Selector` is a singleton field
-(Section 5.5 of [@?RFC9110]) and MUST NOT appear more
+(Section 5.5 of [@!RFC9110]) and MUST NOT appear more
 than once in a response. A recipient that encounters
 more than one instance MUST treat the field as absent
 per Section 4.2 of [@!RFC9651]; the response MUST
 then be treated as unsigned.
 
 `TAI-Signature` is a singleton field (Section 5.5 of
-[@?RFC9110]) and MUST NOT appear more than once in a
+[@!RFC9110]) and MUST NOT appear more than once in a
 response. A recipient that encounters more than one
 instance MUST treat the field as absent per Section
 4.2 of [@!RFC9651]; the response MUST then be treated
@@ -1083,7 +1083,7 @@ per [@?RFC6838]:
 
 IANA is requested to register the following entries in
 the "Hypertext Transfer Protocol (HTTP) Field Name
-Registry" [@?RFC9110]:
+Registry" [@!RFC9110]:
 
 | Field Name        | Status      | Structured Type | Reference     |
 |-------------------|-------------|-----------------|---------------|
