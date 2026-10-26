@@ -124,10 +124,10 @@ rules out UDP-style spoofed-source amplification.
 The protocol-mandated fields of a signed response
 contribute at most approximately 530 bytes at maximum
 field lengths, excluding transport framing and any
-headers added by intermediaries — the response body
+headers added by intermediaries: the response body
 is a fixed 25 bytes, and the protocol-defined headers
 (`TAI-Nonce` echo, `TAI-Signature`, `TAI-Key-Selector`,
-`TAI-Leap-Seconds`) account for the remainder — an
+`TAI-Leap-Seconds`) account for the remainder. An
 attacker cannot induce a response meaningfully larger
 than the request, so Taistamp is not usable as an
 amplification vector.
@@ -194,7 +194,7 @@ hex-expanding the 8-byte seconds field to 16 ASCII
 digits (+8 bytes), and hex-expanding the 4-byte
 nanoseconds field to 8 ASCII digits (+4 bytes), offset
 by dropping the 4-byte attosecond field that TAI64NA
-carries and TAI64N omits (−4 bytes).
+carries and TAI64N omits (-4 bytes).
 
 The choice is driven by the HTTP context. A hex-encoded
 ASCII label is trivially inspectable with `curl`, safe
@@ -211,7 +211,7 @@ First, verification is fast and keys and signatures are
 compact: a public key is 32 bytes and a signature is 64
 bytes, keeping the signed response small and the
 verification cost negligible on constrained clients.
-Second, signing is deterministic — no per-signature
+Second, signing is deterministic: no per-signature
 random nonce is required, which removes an entire class
 of implementation hazard present in ECDSA. Third,
 Ed25519 has no negotiable parameters; there is nothing
@@ -268,7 +268,7 @@ TAI64N time service (IANA port 4014). A client sends a
 packet between 20 and 256 bytes whose first four bytes
 are the ASCII string `ctai`; the server echoes the
 packet with the first byte replaced by `s` and bytes
-4–19 replaced with the current time in TAI64NA format.
+4 to 19 replaced with the current time in TAI64NA format.
 TAICLOCK is the direct conceptual predecessor of
 Taistamp: both serve TAI64N timestamps on demand.
 Taistamp differs in using HTTP (deployable over existing
@@ -449,9 +449,9 @@ The following headers MUST be present:
 `TAI-Leap-Seconds` carries TAI - UTC, in seconds, for
 the instant the label denotes (see below),
 as a Structured Field Integer [@!RFC9651]. leap-seconds
-emitted MUST be a non-negative integer in [0, 2^32−1];
-sf-integer supports values up to ±10^15 but values outside
-[0, 2^32−1] cannot be encoded in `leap-u32be`. A verifier
+emitted MUST be a non-negative integer in [0, 2^32-1];
+sf-integer allows up to 15 decimal digits but values outside
+[0, 2^32-1] cannot be encoded in `leap-u32be`. A verifier
 that receives a `TAI-Leap-Seconds` value outside this range
 MUST treat the response as unsigned.
 Its value is included in the signed payload as `leap-u32be`
@@ -814,12 +814,12 @@ trade-off of increased DNS query load.
 A Taistamp response is assigned one of four trust levels,
 combining the nonce echo result and the key/signature state.
 
-**Level 2 — Signed.** The response `TAI-Nonce` matches the
+**Level 2: Signed.** The response `TAI-Nonce` matches the
 request nonce and the `TAI-Signature` verifies against the
 public key resolved from `TAI-Key-Selector`. The time value
 is both fresh and authenticated.
 
-**Level 1 — Unique.** The response `TAI-Nonce` matches the
+**Level 1: Unique.** The response `TAI-Nonce` matches the
 request nonce, but the signature is absent, the
 `TAI-Key-Selector` is malformed, or the `TAI-Key-Selector`
 does not resolve in DNS. The time value is fresh but
@@ -828,11 +828,11 @@ indicates a configuration error or that the signing key has
 not yet propagated in DNS; this is a soft degradation, not
 a failure.
 
-**Level 0 — Plain.** The response carries no echoed
+**Level 0: Plain.** The response carries no echoed
 `TAI-Nonce`. The time value carries no freshness or
 authentication guarantee from this protocol.
 
-**Level -1 — Inconsistent.** Either the response
+**Level -1: Inconsistent.** Either the response
 `TAI-Nonce` is present but does not match the request
 nonce, or the `TAI-Key-Selector` resolves but the
 `TAI-Signature` does not verify. The response MUST be
@@ -978,7 +978,7 @@ DNS TTL expires. An attacker in possession of the
 compromised private key can forge responses during this
 window; the forged signatures will verify against the
 cached key, assigning Signed (level 2) when the correct
-assignment — given the revoked key — would be Unique
+assignment, given the revoked key, would be Unique
 (level 1) at best.
 
 The exposure window is bounded by the DNS TTL
