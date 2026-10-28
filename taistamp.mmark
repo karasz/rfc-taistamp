@@ -601,11 +601,11 @@ A signed successful response carries two additional headers:
 
 The selector MUST match the following ABNF production
 [@!RFC5234]. The grammar is constrained to the subset
-of DNS LDH labels ([@!RFC1035] Section 2.3.1) that are
+of DNS LDH labels (Section 2.3.1 of [@!RFC1035]) that are
 also valid sf-tokens ([@!RFC9651]); the leading-ALPHA
 requirement follows from sf-token, not from DNS alone,
 because sf-token requires its first character to be
-ALPHA or `*` ([@!RFC9651] Section 4.1.7), excluding
+ALPHA or `*` (Section 4.1.7 of [@!RFC9651]), excluding
 digit-leading labels that DNS would otherwise permit:
 
 ~~~
