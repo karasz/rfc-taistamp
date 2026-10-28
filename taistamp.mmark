@@ -321,9 +321,9 @@ The terms "TAI" and "TAI64N" are used as defined in
 [@!TAI64].
 
 The term "selector" is used in the DKIM
-sense [@?RFC6376]: an opaque, host-scoped label that
-selects one verification key from possibly many
-published under the same host.
+sense [@?RFC6376]: an opaque label, scoped to a
+service host, that selects one verification key from
+possibly many published under that host.
 
 The term "client" refers to any HTTP agent that fetches
 the Taistamp resource at `/.well-known/taistamp`.
@@ -796,6 +796,11 @@ is the value the server emits in `TAI-Key-Selector`.
 A service reached at an IP address has no service
 host, and so no key record.
 
+Neither the URI scheme nor its port is part of the
+owner name. Services at the same service host on
+different schemes or ports therefore share its key
+records.
+
 The TXT record value is a single string, of length at
 most 255 octets, formatted as a tag-value list in the
 DKIM/DMARC style:
@@ -943,9 +948,11 @@ lookup. The verifier MUST:
 2. Confirm that the `TAI-Key-Selector` value
    is a well-formed selector matching the ABNF
    in (#signing).
-3. Resolve the TXT record at
+3. Resolve the TXT record at the absolute name
    `<selector>._taistamp.<host>` and parse the
-   `v`, `k`, and `p` tags.
+   `v`, `k`, and `p` tags. An owner name longer than
+   255 octets in wire format (Section 2.3.4 of
+   [@!RFC1035]) has no record.
 4. Verify the Ed25519 signature using the public key
    from `p` over the framed payload.
 
