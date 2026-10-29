@@ -74,7 +74,7 @@ coordinating with clients.
 
 The protocol is deliberately small. A compliant
 implementation fits in a single HTTP request handler, has no
-state beyond its signing key, and is independent of any
+state beyond its signing keys, and is independent of any
 specific HTTP framework or runtime.
 
 # Design Rationale
@@ -113,7 +113,7 @@ complementary: TLS protects the channel, the Ed25519
 signature protects the claim independently of which
 certificate authority issued the server certificate.
 
-The server is stateless beyond its signing key. This
+The server is stateless beyond its signing keys. This
 is a deliberate design goal: a stateless handler can
 be deployed as a CDN edge function, a serverless
 worker, or behind a load balancer with no session
@@ -146,7 +146,8 @@ records under a DKIM-inspired [@?RFC6376] selector
 scheme; they rotate a key by publishing a new TXT record
 under a new selector and reconfiguring the server, with
 no client coordination required. A client
-that has cached a signed response can continue to verify
+that has cached a signed response, with the service
+host it was requested from, can continue to verify
 it as long as the TXT record at the old selector remains
 in DNS. DNSSEC [@?RFC4033] protects the key material
 end-to-end and is strongly recommended where the
@@ -327,6 +328,18 @@ published under the same host.
 The term "client" refers to any HTTP agent that fetches
 the Taistamp resource at `/.well-known/taistamp`.
 
+The term "service host" refers to the host
+subcomponent (Section 3.2.2 of [@!RFC3986]) of the URI
+at which a client requests `/.well-known/taistamp`,
+folded to lower case and without a trailing dot, when
+that host is a domain name in ASCII: each label an
+LDH label [@!RFC5890], A-labels included. An
+application converts an internationalised name to
+A-labels before it builds the URI, so that a client
+does not map it again. A URI whose host is anything
+else, such as an IP address or a name with non-ASCII
+characters, has no service host.
+
 The term "verifier" refers to a client that performs
 signature verification on a Taistamp response.
 
@@ -357,8 +370,8 @@ support MAY accept `OPTIONS`. A server MUST respond
 `405 Method Not Allowed` to any method it does not
 accept. The `Allow` header on a 405 response, and
 on a successful `OPTIONS` response, MUST enumerate
-the methods the server accepts ([@?RFC9110],
-Section 10.2.1): a server that accepts `OPTIONS`
+the methods the server accepts (Section 10.2.1 of
+[@!RFC9110]): a server that accepts `OPTIONS`
 emits `Allow: GET, HEAD, OPTIONS`; one that does
 not emits `Allow: GET, HEAD`.
 
@@ -372,7 +385,7 @@ without it; `HEAD` is therefore useful only as a
 liveness or configuration probe. Note that this
 makes `HEAD` responses non-equivalent to the
 corresponding `GET` response in the sense of
-[@?RFC9110] Section 9.3.2; carrying an unverifiable
+Section 9.3.2 of [@!RFC9110]; carrying an unverifiable
 signature on a bodyless response would be misleading.
 
 `OPTIONS` responses MUST NOT carry any `TAI-*` response
@@ -457,7 +470,7 @@ MUST treat the response as unsigned.
 Its value is included in the signed payload as `leap-u32be`
 (see (#framed-payload)). A server MUST emit it on
 every successful response. It is a singleton field
-(Section 5.5 of [@?RFC9110]) and MUST NOT appear
+(Section 5.5 of [@!RFC9110]) and MUST NOT appear
 more than once in a response. A recipient that
 encounters more than one instance MUST treat the field
 as absent per Section 4.2 of [@!RFC9651];
@@ -498,7 +511,7 @@ Binary [@!RFC9651]. If present on a `GET` request, the server
 MUST include a `TAI-Nonce` response field whose
 `sf-binary` value encodes the same octet sequence
 as the request field. `TAI-Nonce` is a
-singleton field (Section 5.5 of [@?RFC9110]) and MUST
+singleton field (Section 5.5 of [@!RFC9110]) and MUST
 NOT appear more than once in a request or response. A
 recipient that encounters more than one instance MUST
 treat the field as absent per Section 4.2 of
@@ -587,10 +600,12 @@ no freshness guarantee.
 
 # Signing
 
-A Taistamp service MAY be configured with an Ed25519
-[@!RFC8032] signing key and a selector. When both are
-configured, the server signs every response that
-carries a `TAI-Nonce`.
+A Taistamp service MAY be configured, for each service
+host it serves, with an Ed25519 [@!RFC8032] signing
+key and a selector. When both are configured for the
+service host of a request (see (#when-to-sign)), the
+server signs every response that carries a
+`TAI-Nonce`.
 
 A signed successful response carries two additional headers:
 
@@ -614,14 +629,14 @@ selector = ALPHA [ *61( ALPHA / DIGIT / "-" )
 ~~~
 
 `TAI-Key-Selector` is a singleton field
-(Section 5.5 of [@?RFC9110]) and MUST NOT appear more
+(Section 5.5 of [@!RFC9110]) and MUST NOT appear more
 than once in a response. A recipient that encounters
 more than one instance MUST treat the field as absent
 per Section 4.2 of [@!RFC9651]; the response MUST
 then be treated as unsigned.
 
 `TAI-Signature` is a singleton field (Section 5.5 of
-[@?RFC9110]) and MUST NOT appear more than once in a
+[@!RFC9110]) and MUST NOT appear more than once in a
 response. A recipient that encounters more than one
 instance MUST treat the field as absent per Section
 4.2 of [@!RFC9651]; the response MUST then be treated
@@ -645,11 +660,14 @@ leap-u32be    = 4 octets  ; TAI-Leap-Seconds,
               ;   big-endian unsigned
 selector-len  = 1 octet   ; length of selector-bytes, 1..63
 selector-bytes = 1..63 octets ; the selector, ASCII
+host-len      = 1 octet   ; length of host-bytes, 1..253
+host-bytes    = 1..253 octets ; the service host, ASCII
 nonce-bytes   = octets    ; decoded sf-binary octets
               ;   of the TAI-Nonce field value
 
 payload = domain-tag label-bytes leap-u32be
-          selector-len selector-bytes nonce-bytes
+          selector-len selector-bytes
+          host-len host-bytes nonce-bytes
 ~~~
 
 nonce-bytes is the octet sequence obtained by
@@ -672,6 +690,15 @@ forging a valid signature for a different selector
 length is computationally infeasible under the
 existential unforgeability of Ed25519.
 
+`host-bytes` is the service host, length-prefixed like
+the selector: the one the server signs for (see
+(#when-to-sign)), which a verifier takes as the host
+to which it sent the request (see (#verification)).
+It binds the signature to that host: a response signed
+for one service host does not verify for another, even
+when both publish the same key under the same selector
+(see (#host-binding)).
+
 The nonce occupies the tail of the payload. Its length
 is therefore self-delimiting: a verifier computes
 `nonce-bytes` from the decoded `TAI-Nonce` sf-binary
@@ -683,9 +710,42 @@ with no explicit length field required.
 A server MUST sign a response if and only if all of
 the following hold:
 
-- The server is configured with a key and selector.
+- The server is configured with a key and selector
+  for the service host the request is for, as
+  determined below.
 - The request carried a `TAI-Nonce` header.
 - The response is a 200 to `GET`.
+
+A server configured for a single service host signs
+for that host whatever the request's `Host` or
+`:authority` field says, so that an intermediary that
+rewrites `Host` to the origin's name does not stop it
+signing. A response forwarded to another host fails
+verification there. A server meant to answer under
+more than one name, for instance through a CNAME, or
+that also serves hosts without a key, serves several
+service hosts.
+
+A server that serves several service hosts first
+selects a host. When an intermediary it is configured
+to trust added a `Forwarded` element [@!RFC7239] with
+a `host` parameter, the server takes that parameter,
+with any quoting removed; an intermediary directly in
+front of the server adds the last element. Otherwise,
+it takes the host of the request's target URI
+(Section 7.1 of [@!RFC9110]). It removes any port
+from the selected host and normalises it as in
+(#conventions-and-definitions). If the result is not
+a service host, such as an IP address, the response
+is unsigned, as it is for a service host the server
+serves without a key. The server SHOULD respond
+`421 Misdirected Request`
+(Section 15.5.20 of [@!RFC9110]) to a `GET` carrying a
+`TAI-Nonce` for a service host it does not serve.
+Signing for whatever host a request names would
+let an on-path attacker obtain a signature for any
+host that publishes the same key (see
+(#host-binding)).
 
 A request without a nonce MAY receive an unsigned
 response even when the server is configured to sign.
@@ -713,22 +773,28 @@ avoid placing non-transparent intermediaries between client and
 server, or verify that any intermediaries are configured to
 forward these fields intact.
 
+An intermediary that rewrites `Host` or `:authority`
+does not affect a server that serves a single service
+host (see (#when-to-sign)). In front of a server that
+serves several, it SHOULD convey the original host in
+a `Forwarded` field [@!RFC7239].
+
 # Key Publication
 
 This section applies only to servers configured
 with a signing key and selector.
 
-A server publishes its verification key as a DNS
-TXT record. The owner name is
+A server publishes its verification key for each
+service host as a DNS TXT record. The owner name is
 
 ~~~
 <selector> "._taistamp." <host>
 ~~~
 
-where `<host>` is the authority component of the URL at
-which `/.well-known/taistamp` is served, and
-`<selector>` is the value the server emits in
-`TAI-Key-Selector`.
+where `<host>` is the service host, and `<selector>`
+is the value the server emits in `TAI-Key-Selector`.
+A service reached at an IP address has no service
+host, and so no key record.
 
 The TXT record value is a single string, of length at
 most 255 octets, formatted as a tag-value list in the
@@ -783,7 +849,9 @@ record MAY then be removed.
 ### Verifier Key Caching
 
 A verifier MAY cache the parsed public key for a
-selector. Verifiers MUST respect the DNS TTL
+service host and selector, keyed by both: the same
+selector can name different keys under different
+service hosts. Verifiers MUST respect the DNS TTL
 returned by the resolver and MUST NOT use a cached
 entry beyond that TTL. Verifiers MUST NOT apply a
 hardcoded minimum or maximum cache lifetime that
@@ -795,9 +863,10 @@ the signature as invalid.
 ### Key Revocation
 
 If a signing key is compromised, the operator MUST
-remove its TXT record immediately, without a
-retirement period. Removing the TXT record is the
-only revocation mechanism defined by this protocol;
+immediately remove every TXT record that publishes it,
+under each service host, without a retirement period.
+Removing the TXT records is the only revocation
+mechanism defined by this protocol;
 no out-of-band revocation channel is specified.
 
 Verifiers that have cached the public key will
@@ -816,7 +885,8 @@ combining the nonce echo result and the key/signature state.
 
 **Level 2 — Signed.** The response `TAI-Nonce` matches the
 request nonce and the `TAI-Signature` verifies against the
-public key resolved from `TAI-Key-Selector`. The time value
+public key resolved from `TAI-Key-Selector` under the
+service host (see (#verification)). The time value
 is both fresh and authenticated.
 
 **Level 1 — Unique.** The response `TAI-Nonce` matches the
@@ -846,9 +916,26 @@ the scope of this document.
 # Verification
 
 This section applies when the response carries both
-`TAI-Key-Selector` and `TAI-Signature`. A verifier
-reads the response and reconstructs the framed
-payload as defined in (#signing). The verifier MUST:
+`TAI-Key-Selector` and `TAI-Signature`, and the
+request URI has a service host. A response to a
+request whose URI has no service host, such as one
+with an IP address as its host, MUST be treated as
+unsigned. So MUST a response reached by following a
+redirect to another host: the client did not choose
+that host, and an on-path attacker can redirect a
+plaintext request to a host whose key it holds. A
+client SHOULD NOT follow such a redirect
+automatically, as that sends the same `TAI-Nonce` to
+a second host (see (#replay)). An application that
+trusts the new host can make a new request to it,
+with a new nonce.
+
+A verifier reads the response and reconstructs the
+framed payload as defined in (#framed-payload), with
+`host-bytes` set to the service host to which it sent
+the request. That is the `<host>` of the owner name in
+step 3, not a name to which a CNAME or DNAME leads the
+lookup. The verifier MUST:
 
 1. Confirm that the decoded `sf-binary` octets of
    the response `TAI-Nonce` match those of the
@@ -920,6 +1007,31 @@ being induced to sign a message valid under another
 protocol that happens to embed the same suffix.
 Operators MUST NOT reuse a Taistamp signing key for
 any other purpose.
+
+## Host Binding
+
+The signed payload includes the service host. Without
+it, a response from one host would verify for any
+other host that publishes the same key under the same
+selector, and an on-path attacker could answer a
+request to one host with a response from another,
+choosing among every clock that signs with that key.
+
+With the service host signed, several hosts can share
+a key, for instance a provider serving its customers
+from one zone of key records that each customer
+reaches by a CNAME or DNAME: a response signed for one
+service host fails verification for another, at level
+-1. This depends on servers signing only for the
+service hosts they are configured to serve (see
+(#when-to-sign)), and on verifiers using the host they
+sent the request to (see (#verification)).
+
+Host binding does not limit the holder of a shared
+key: the provider, or anyone who compromises the key,
+can sign for every service host that publishes it.
+Revoking such a key means removing every record that
+publishes it (see (#key-revocation)).
 
 ## DNS Trust
 
@@ -1082,7 +1194,7 @@ per [@?RFC6838]:
 
 IANA is requested to register the following entries in
 the "Hypertext Transfer Protocol (HTTP) Field Name
-Registry" [@?RFC9110]:
+Registry" [@!RFC9110]:
 
 | Field Name        | Status      | Structured Type | Reference     |
 |-------------------|-------------|-----------------|---------------|
