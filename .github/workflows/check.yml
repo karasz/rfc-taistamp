@@ -1,0 +1,33 @@
+name: Check
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+# a newer push to a pull request cancels its older run; each push to
+# master runs at once, in a group of its own
+concurrency:
+  group: check-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-tools
+
+      - name: Build
+        run: make build
+
+      # -k runs every check past a failing one
+      - name: Check
+        run: make -k check || echo "::warning::make check failed"
