@@ -85,9 +85,9 @@ HTTP is available everywhere a network connection is.
 Browsers, serverless runtimes (Cloudflare Workers, AWS
 Lambda, Deno Deploy), edge nodes, and CDN origins can
 all serve and consume HTTP without additional
-infrastructure. Port 443 (or 80) is open where
-UDP 123 (NTP), UDP 2002 (Roughtime, port
-assignment pending), and UDP 4014
+infrastructure. TCP ports 443 and 80 are often permitted
+on networks where UDP 123 (NTP), TCP or UDP 5319
+(Roughtime [@?RFC10049]), and UDP 4014
 (TAICLOCK [@?TAICLOCK]) are commonly firewalled.
 A compliant Taistamp server requires nothing beyond a
 single request handler; a compliant client requires
@@ -105,7 +105,7 @@ cannot forge the signature can at most drop or delay
 responses, which is a denial of service rather than
 a security breach.
 
-TLS [@?RFC8446] is RECOMMENDED. It adds transport
+TLS [@?RFC9846] is RECOMMENDED. It adds transport
 confidentiality (hiding that a client is querying for
 time and from which server) and an additional layer of
 integrity. Where used, the two layers are
@@ -124,17 +124,17 @@ rules out UDP-style spoofed-source amplification.
 The protocol-mandated fields of a signed response
 contribute at most approximately 530 bytes at maximum
 field lengths, excluding transport framing and any
-headers added by intermediaries — the response body
+headers added by intermediaries: the response body
 is a fixed 25 bytes, and the protocol-defined headers
 (`TAI-Nonce` echo, `TAI-Signature`, `TAI-Key-Selector`,
-`TAI-Leap-Seconds`) account for the remainder — an
+`TAI-Leap-Seconds`) account for the remainder. An
 attacker cannot induce a response meaningfully larger
 than the request, so Taistamp is not usable as an
 amplification vector.
 
 ## Why DNS-Based Key Discovery
 
-Roughtime [@Roughtime] addresses the same authenticated
+Roughtime [@?RFC10049] addresses the same authenticated
 time problem but distributes trust differently: clients
 ship with a configured list of trusted server public keys.
 Key rotation therefore requires a client update or a
@@ -194,7 +194,7 @@ hex-expanding the 8-byte seconds field to 16 ASCII
 digits (+8 bytes), and hex-expanding the 4-byte
 nanoseconds field to 8 ASCII digits (+4 bytes), offset
 by dropping the 4-byte attosecond field that TAI64NA
-carries and TAI64N omits (−4 bytes).
+carries and TAI64N omits (-4 bytes).
 
 The choice is driven by the HTTP context. A hex-encoded
 ASCII label is trivially inspectable with `curl`, safe
@@ -211,7 +211,7 @@ First, verification is fast and keys and signatures are
 compact: a public key is 32 bytes and a signature is 64
 bytes, keeping the signed response small and the
 verification cost negligible on constrained clients.
-Second, signing is deterministic — no per-signature
+Second, signing is deterministic: no per-signature
 random nonce is required, which removes an entire class
 of implementation hazard present in ECDSA. Third,
 Ed25519 has no negotiable parameters; there is nothing
@@ -255,7 +255,7 @@ uncertainty. It does not protect against a server
 operator who deliberately signs an incorrect time: the
 signature attests to what the server claimed, not to
 the accuracy of its clock. It does not provide
-confidentiality; TLS [@?RFC8446] SHOULD be used when
+confidentiality; TLS [@?RFC9846] SHOULD be used when
 confidentiality of the query or response is required.
 It is not a document timestamping service in the sense
 of RFC 3161 [@?RFC3161]: it timestamps moments,
@@ -268,7 +268,7 @@ TAI64N time service (IANA port 4014). A client sends a
 packet between 20 and 256 bytes whose first four bytes
 are the ASCII string `ctai`; the server echoes the
 packet with the first byte replaced by `s` and bytes
-4–19 replaced with the current time in TAI64NA format.
+4 to 19 replaced with the current time in TAI64NA format.
 TAICLOCK is the direct conceptual predecessor of
 Taistamp: both serve TAI64N timestamps on demand.
 Taistamp differs in using HTTP (deployable over existing
@@ -297,11 +297,11 @@ document existed at a given time. TSP timestamps
 artefacts; Taistamp timestamps moments. The two
 protocols are complementary rather than overlapping.
 
-**Roughtime [@Roughtime]** is an authenticated time
+**Roughtime [@?RFC10049]** is an authenticated time
 protocol that also uses Ed25519 signatures and is
-designed for constrained clients. It operates over UDP,
-distributes trust via a configured list of server
-public keys, and detects misbehaving servers by
+designed for constrained clients. It operates over UDP
+or TCP, distributes trust via a configured list of
+server public keys, and detects misbehaving servers by
 comparing timestamps and accuracy radii across
 multiple providers. Taistamp is simpler and more narrowly
 scoped: a single HTTP endpoint, DNS-based key
@@ -449,9 +449,9 @@ The following headers MUST be present:
 `TAI-Leap-Seconds` carries TAI - UTC, in seconds, for
 the instant the label denotes (see below),
 as a Structured Field Integer [@!RFC9651]. leap-seconds
-emitted MUST be a non-negative integer in [0, 2^32−1];
-sf-integer supports values up to ±10^15 but values outside
-[0, 2^32−1] cannot be encoded in `leap-u32be`. A verifier
+emitted MUST be a non-negative integer in [0, 2^32-1];
+sf-integer allows up to 15 decimal digits but values outside
+[0, 2^32-1] cannot be encoded in `leap-u32be`. A verifier
 that receives a `TAI-Leap-Seconds` value outside this range
 MUST treat the response as unsigned.
 Its value is included in the signed payload as `leap-u32be`
@@ -601,11 +601,11 @@ A signed successful response carries two additional headers:
 
 The selector MUST match the following ABNF production
 [@!RFC5234]. The grammar is constrained to the subset
-of DNS LDH labels ([@!RFC1035] Section 2.3.1) that are
+of DNS LDH labels (Section 2.3.1 of [@!RFC1035]) that are
 also valid sf-tokens ([@!RFC9651]); the leading-ALPHA
 requirement follows from sf-token, not from DNS alone,
 because sf-token requires its first character to be
-ALPHA or `*` ([@!RFC9651] Section 4.1.7), excluding
+ALPHA or `*` (Section 4.1.7 of [@!RFC9651]), excluding
 digit-leading labels that DNS would otherwise permit:
 
 ~~~
@@ -814,12 +814,12 @@ trade-off of increased DNS query load.
 A Taistamp response is assigned one of four trust levels,
 combining the nonce echo result and the key/signature state.
 
-**Level 2 — Signed.** The response `TAI-Nonce` matches the
+**Level 2: Signed.** The response `TAI-Nonce` matches the
 request nonce and the `TAI-Signature` verifies against the
 public key resolved from `TAI-Key-Selector`. The time value
 is both fresh and authenticated.
 
-**Level 1 — Unique.** The response `TAI-Nonce` matches the
+**Level 1: Unique.** The response `TAI-Nonce` matches the
 request nonce, but the signature is absent, the
 `TAI-Key-Selector` is malformed, or the `TAI-Key-Selector`
 does not resolve in DNS. The time value is fresh but
@@ -828,11 +828,11 @@ indicates a configuration error or that the signing key has
 not yet propagated in DNS; this is a soft degradation, not
 a failure.
 
-**Level 0 — Plain.** The response carries no echoed
+**Level 0: Plain.** The response carries no echoed
 `TAI-Nonce`. The time value carries no freshness or
 authentication guarantee from this protocol.
 
-**Level -1 — Inconsistent.** Either the response
+**Level -1: Inconsistent.** Either the response
 `TAI-Nonce` is present but does not match the request
 nonce, or the `TAI-Key-Selector` resolves but the
 `TAI-Signature` does not verify. The response MUST be
@@ -978,7 +978,7 @@ DNS TTL expires. An attacker in possession of the
 compromised private key can forge responses during this
 window; the forged signatures will verify against the
 cached key, assigning Signed (level 2) when the correct
-assignment — given the revoked key — would be Unique
+assignment, given the revoked key, would be Unique
 (level 1) at best.
 
 The exposure window is bounded by the DNS TTL
@@ -1123,15 +1123,5 @@ Registry" [@?RFC9110]:
     <author initials="D. J." surname="Bernstein" fullname="Daniel J. Bernstein"/>
     <date year="1997"/>
   </front>
-</reference>
-
-<reference anchor="Roughtime" target="https://datatracker.ietf.org/doc/draft-ietf-ntp-roughtime/">
-  <front>
-    <title>Roughtime</title>
-    <author initials="W." surname="Ladd" fullname="Watson Ladd"/>
-    <author initials="M." surname="Dansarie" fullname="Marcus Dansarie"/>
-    <date year="2026"/>
-  </front>
-  <annotation>Aanchal Malhotra and Adam Langley authored early drafts of this document.</annotation>
 </reference>
 
