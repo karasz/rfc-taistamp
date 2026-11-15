@@ -1,0 +1,63 @@
+name: Set up tools
+description: Install the tools the Makefile runs by name.
+
+runs:
+  using: composite
+  steps:
+    - id: python
+      uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+      with:
+        python-version: '3.x'
+
+    - id: node
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version: lts/*
+
+    # the key follows this file, where the versions are pinned, and the
+    # interpreters the installed tools run on
+    - id: restore
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/tools
+        key: tools-${{ runner.os }}-${{ runner.arch }}-python-${{ steps.python.outputs.python-version }}-node-${{ steps.node.outputs.node-version }}-${{ hashFiles('.github/actions/setup-tools/action.yml') }}
+
+    # mmark is a static binary: Go is only needed to build it
+    - if: steps.restore.outputs.cache-hit != 'true'
+      uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      with:
+        go-version: stable
+        # no go.sum to key a cache on
+        cache: false
+
+    - name: Install tools
+      if: steps.restore.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        TOOLS: ${{ runner.temp }}/tools
+      run: |
+        GOBIN="$TOOLS/bin" timeout 300 \
+          go install github.com/mmarkdown/mmark/v2@v2.2.48
+        python -m venv "$TOOLS/venv"
+        timeout 300 "$TOOLS/venv/bin/pip" install xml2rfc==3.35.0
+        timeout 300 npm install --prefix "$TOOLS/npm" \
+          cspell@10.4.0 @ietf-tools/idnits@3.3.0
+        # linked beside mmark, so that PATH holds the tools alone;
+        # relative, so they hold wherever the cache is restored
+        ln -s ../venv/bin/xml2rfc "$TOOLS/bin/xml2rfc"
+        ln -s ../npm/node_modules/.bin/cspell "$TOOLS/bin/cspell"
+        ln -s ../npm/node_modules/.bin/idnits "$TOOLS/bin/idnits"
+
+    # saved now rather than at the end of the job, so a draft that fails
+    # its checks still leaves the tools cached
+    - if: steps.restore.outputs.cache-hit != 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/tools
+        key: ${{ steps.restore.outputs.cache-primary-key }}
+
+    - name: Add tools to PATH
+      shell: bash
+      env:
+        TOOLS: ${{ runner.temp }}/tools
+      run: echo "$TOOLS/bin" >> "$GITHUB_PATH"
