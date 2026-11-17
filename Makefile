@@ -8,6 +8,7 @@ MMARK   := mmark
 XML2RFC := xml2rfc
 CSPELL  := cspell
 IDNITS  := idnits
+IDNITS_FLAGS := --fail-on warnings
 
 # check_tool,<binary>,<install hint>
 check_tool = command -v $(1) >/dev/null 2>&1 || \
@@ -50,7 +51,7 @@ whitespace:
 
 idnits: $(TXT)
 	@$(call check_tool,$(IDNITS),Install: https://author-tools.ietf.org/idnits)
-	$(IDNITS) $<
+	$(IDNITS) $(IDNITS_FLAGS) $<
 
 clean:
 	rm -f $(XML) $(TXT) $(HTML)
