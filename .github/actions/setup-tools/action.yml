@@ -42,8 +42,7 @@ runs:
         timeout 300 "$TOOLS/venv/bin/pip" install xml2rfc==3.35.0
         timeout 300 npm install --prefix "$TOOLS/npm" \
           cspell@10.4.0 @ietf-tools/idnits@3.3.0
-        # linked beside mmark, so that PATH holds the tools alone;
-        # relative, so they hold wherever the cache is restored
+        # linked beside mmark, so that PATH holds the tools alone
         ln -s ../venv/bin/xml2rfc "$TOOLS/bin/xml2rfc"
         ln -s ../npm/node_modules/.bin/cspell "$TOOLS/bin/cspell"
         ln -s ../npm/node_modules/.bin/idnits "$TOOLS/bin/idnits"
