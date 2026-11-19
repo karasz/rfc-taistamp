@@ -10,11 +10,17 @@ CSPELL  := cspell
 IDNITS  := idnits
 IDNITS_FLAGS := --fail-on warnings
 
+ACTIONLINT_URL := github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+ACTIONLINT ?= $(call installed_or_run,actionlint,go run $(ACTIONLINT_URL))
+
 # check_tool,<binary>,<install hint>
 check_tool = command -v $(1) >/dev/null 2>&1 || \
 	{ echo "$(1) not found. $(2)"; exit 1; }
 
-.PHONY: all build check lint spell whitespace idnits clean update-date
+# installed_or_run,<binary>,<command>: <binary> when installed, else <command>
+installed_or_run = $(if $(shell command -v $(1) 2>/dev/null),$(1),$(2))
+
+.PHONY: all build check lint spell whitespace idnits actionlint clean update-date
 
 all: build check
 
@@ -52,6 +58,9 @@ whitespace:
 idnits: $(TXT)
 	@$(call check_tool,$(IDNITS),Install: https://author-tools.ietf.org/idnits)
 	$(IDNITS) $(IDNITS_FLAGS) $<
+
+actionlint:
+	$(ACTIONLINT)
 
 clean:
 	rm -f $(XML) $(TXT) $(HTML)
