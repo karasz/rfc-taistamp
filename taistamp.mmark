@@ -5,11 +5,11 @@ ipr = "trust200902"
 area = "Applications"
 submissiontype = "independent"
 keyword = ["TAI64N", "TAI", "time", "Ed25519", "well-known", "DKIM"]
-date = 2026-05-15T11:01:51Z
+date = 2026-11-19T21:26:41Z
 
 [seriesInfo]
 name = "Internet-Draft"
-value = "draft-mery-nagy-taistamp-00"
+value = "draft-mery-nagy-taistamp-01"
 stream = "independent"
 status = "informational"
 
