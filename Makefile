@@ -4,10 +4,16 @@ XML     := $(DRAFT).xml
 TXT     := $(DRAFT).txt
 HTML    := $(DRAFT).html
 
-MMARK   := mmark
 XML2RFC := xml2rfc
-CSPELL  := cspell
-IDNITS  := idnits
+
+MMARK_URL := github.com/mmarkdown/mmark/v2@v2.2.48
+MMARK ?= $(call installed_or_run,mmark,go run $(MMARK_URL))
+
+CSPELL_PKG := cspell@10.4.0
+CSPELL ?= $(call installed_or_run,cspell,npx --yes $(CSPELL_PKG))
+
+IDNITS_PKG := @ietf-tools/idnits@3.3.0
+IDNITS ?= $(call installed_or_run,idnits,npx --yes --package=$(IDNITS_PKG) idnits)
 IDNITS_FLAGS := --fail-on warnings
 
 ACTIONLINT_URL := github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
@@ -31,15 +37,14 @@ update-date:
 
 $(XML): $(SRC)
 	@$(MAKE) update-date
-	@$(call check_tool,$(MMARK),Install: go install github.com/mmarkdown/mmark/v2@latest)
 	$(MMARK) $< > $@~ && mv $@~ $@
 
 $(TXT): $(XML)
-	@$(call check_tool,$(XML2RFC),Install: pip install xml2rfc)
+	@$(call check_tool,$(XML2RFC),Install: pip install xml2rfc==3.35.0)
 	$(XML2RFC) --text -o $@ $<
 
 $(HTML): $(XML)
-	@$(call check_tool,$(XML2RFC),Install: pip install xml2rfc)
+	@$(call check_tool,$(XML2RFC),Install: pip install xml2rfc==3.35.0)
 	$(XML2RFC) --html -o $@ $<
 
 check: lint idnits
@@ -47,7 +52,6 @@ check: lint idnits
 lint: spell whitespace
 
 spell:
-	@$(call check_tool,$(CSPELL),Install: npm install -g cspell)
 	$(CSPELL) --no-progress $(SRC)
 
 whitespace:
@@ -56,7 +60,6 @@ whitespace:
 	@grep -Pn '\r' $(SRC) && { echo "CRLF line endings found"; exit 1; } || true
 
 idnits: $(TXT)
-	@$(call check_tool,$(IDNITS),Install: https://author-tools.ietf.org/idnits)
 	$(IDNITS) $(IDNITS_FLAGS) $<
 
 actionlint:
