@@ -2,24 +2,33 @@ name: Check
 
 on:
   push:
-    branches: [master]
+    # `*` stops at a `/`
+    branches-ignore: ['**-wip']
   pull_request:
 
 permissions:
   contents: read
 
-# a newer push to a pull request cancels its older run; each push to
-# master runs at once, in a group of its own
+# a newer run for a branch or pull request cancels the older one; each
+# push to master runs at once, in a group of its own
 concurrency:
-  group: check-${{ github.event.pull_request.number || github.run_id }}
+  group: >-
+    check-${{ github.event.pull_request.number ||
+    (github.ref == 'refs/heads/master' && github.run_id) ||
+    github.ref }}
   cancel-in-progress: true
 
 jobs:
   check:
+    # a pull request from a fork is checked whatever its branch is called
+    if: >-
+      github.event_name == 'push' ||
+      github.event.pull_request.head.repo.full_name != github.repository ||
+      !endsWith(github.head_ref, '-wip')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -27,6 +36,18 @@ jobs:
 
       - name: Build
         run: make build
+
+      # before Check, so a failing check still leaves the draft
+      - name: Upload draft
+        uses: actions/upload-artifact@v7
+        with:
+          name: draft
+          path: |
+            draft-*.txt
+            draft-*.html
+            draft-*.xml
+          if-no-files-found: error
+          retention-days: 14
 
       # -k runs every check past a failing one
       - name: Check
