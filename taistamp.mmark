@@ -5,7 +5,7 @@ ipr = "trust200902"
 area = "Applications"
 submissiontype = "independent"
 keyword = ["TAI64N", "TAI", "time", "Ed25519", "well-known", "DKIM"]
-date = 2026-11-19T21:26:41Z
+date = 2026-11-20T12:33:45Z
 
 [seriesInfo]
 name = "Internet-Draft"
